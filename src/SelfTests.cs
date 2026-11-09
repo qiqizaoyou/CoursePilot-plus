@@ -128,6 +128,7 @@ namespace CoursePilot
                 System.Threading.Tasks.Task.Run(delegate { return TestExactFillReadback(output); }).GetAwaiter().GetResult();
                 System.Threading.Tasks.Task.Run(delegate { return TestCaretReadback(output); }).GetAwaiter().GetResult();
                 System.Threading.Tasks.Task.Run(delegate { return TestQuizSubmission(output); }).GetAwaiter().GetResult();
+                System.Threading.Tasks.Task.Run(delegate { return TestQuizScrollConfirmation(output); }).GetAwaiter().GetResult();
                 System.Threading.Tasks.Task.Run(delegate { return TestChoiceOcr(output); }).GetAwaiter().GetResult();
                 System.Threading.Tasks.Task.Run(delegate { return TestChoiceState(output); }).GetAwaiter().GetResult();
                 System.Threading.Tasks.Task.Run(delegate { return TestIsolatedChoices(output); }).GetAwaiter().GetResult();

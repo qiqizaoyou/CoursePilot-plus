@@ -178,7 +178,7 @@ namespace CoursePilot
             Directory.CreateDirectory(directory);
             Region[] areas = CalibrationAreas.Get(regions, group);
             for (int i = 0; i < areas.Length; i++) using (Bitmap crop = Recognition.Crop(screen, areas[i])) crop.Save(Path.Combine(directory, "region-" + (i + 1) + ".png"), ImageFormat.Png);
-            File.WriteAllText(Path.Combine(directory, "report.json"), new JavaScriptSerializer().Serialize(new { version = "0.6.14", environment, report,
+            File.WriteAllText(Path.Combine(directory, "report.json"), new JavaScriptSerializer().Serialize(new { version = "0.6.15", environment, report,
                 regions = areas, names = CalibrationAreas.Names(group) }), Encoding.UTF8);
             File.WriteAllText(Path.Combine(directory, "说明.txt"), "此包由只识别模式生成，未点击课程、滚动或调用模型。仅包含本次选定区域截图及识别诊断，不包含 API Key。\n" + report.Summary(), Encoding.UTF8);
             return directory;

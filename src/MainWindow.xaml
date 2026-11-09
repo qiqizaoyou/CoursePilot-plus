@@ -70,7 +70,7 @@
         <StackPanel Grid.Row="2">
           <Border Height="1" Background="#E8E8E8" Margin="0,0,0,17"/>
           <TextBlock Text="本地识别 · 双模型审核" Foreground="#777777" FontSize="11"/>
-          <TextBlock Text="Windows 11  ·  v0.6.14" Foreground="#A0A0A0" FontSize="10" Margin="0,6,0,0"/>
+          <TextBlock Text="Windows 11  ·  v0.6.15" Foreground="#A0A0A0" FontSize="10" Margin="0,6,0,0"/>
         </StackPanel>
       </Grid>
       </ScrollViewer>

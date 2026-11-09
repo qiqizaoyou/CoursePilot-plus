@@ -23,8 +23,8 @@ using FontFamily = System.Windows.Media.FontFamily;
 
 [assembly: AssemblyTitle("随课 · CoursePilot")]
 [assembly: AssemblyDescription("课程视频监测与 DeepSeek 章节测验解答复核工具")]
-[assembly: AssemblyVersion("0.6.14.0")]
-[assembly: AssemblyFileVersion("0.6.14.0")]
+[assembly: AssemblyVersion("0.6.15.0")]
+[assembly: AssemblyFileVersion("0.6.15.0")]
 
 namespace CoursePilot
 {

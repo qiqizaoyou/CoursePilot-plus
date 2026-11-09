@@ -77,7 +77,7 @@ namespace CoursePilot
             internal readonly List<string> Events = new List<string>();
             internal int State, FooterClicks, ConfirmClicks, CancelClicks, DownStill, UpStill;
             internal long FooterTime, ConfirmTime;
-            internal bool AlwaysWarn, UnknownDialog, FailResult, CancelFails, HideFirst;
+            internal bool AlwaysWarn, UnknownDialog, FailResult, CancelFails, HideFirst, NoisyBottom;
             internal Action BeforeFirstSubmit;
             private bool warning;
             private readonly Rectangle panel = new Rectangle(730, 510, 600, 290);
@@ -124,6 +124,7 @@ namespace CoursePilot
                         g.DrawString("我的答案：", font, Brushes.Black, 400, 400); g.DrawString("20.0 分", font, Brushes.Black, 1200, 400);
                     }
                 }
+                if (NoisyBottom && State == 0 && DownStill > 0) screen.SetPixel(Body.Right - 12, Body.Top + 15, Color.Black);
                 return screen;
             }
             private bool Missing()
@@ -243,6 +244,18 @@ namespace CoursePilot
                     if (scenario == 4) Assert(fixture.ConfirmClicks == 1 && fixture.FooterClicks == 1 && error.Contains("未重复提交"), "unconfirmed submission result is not submitted again");
                     if (scenario == 5) Assert(fixture.CancelClicks == 1 && !fixture.Events.Contains("repair-top"), "failed cancel never scrolls the background");
                 }
+            }
+            using (SubmissionFixture fixture = new SubmissionFixture { NoisyBottom = true })
+            {
+                QuizModelFixture model = new QuizModelFixture(); List<string> logs = new List<string>();
+                string stage = null;
+                ChapterQuiz quiz = new ChapterQuiz(fixture, fixture.Regions, fixture, fixture.Clock, delegate { return model; }, logs.Add,
+                    delegate(Bitmap header, Bitmap image, int completed, string progress) { if (progress.Contains("正在确认页尾并准备提交")) stage = progress; });
+                using (Bitmap first = fixture.Capture()) Assert(await quiz.TryRun(first, CancellationToken.None) && quiz.Submitted,
+                    "transient pixel change at footer still reaches the existing submission workflow");
+                Assert(fixture.FooterClicks == 1 && fixture.ConfirmClicks == 1 && fixture.DownStill >= 4 && model.Solves == 2 && model.Reviews == 2,
+                    "noisy footer retries without re-answering, premature submit or duplicate submit");
+                Assert(stage != null && logs.Any(l => l.Contains("全部 2 题已完成，正在确认页尾并准备提交")), "completed quiz displays footer confirmation instead of searching for a nonexistent question");
             }
             using (SubmissionFixture fixture = new SubmissionFixture(true))
             {

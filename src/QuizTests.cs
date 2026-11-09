@@ -253,7 +253,7 @@ namespace CoursePilot
                 int inspect = logs.FindIndex(l => l.Contains("先在当前画面识别下一题"));
                 int missing = logs.FindIndex(l => l.Contains("第 2 题尚未识别到完整下边界"));
                 Assert(wheelsAtFirstReview == 0 && wheelsAtSecondSolve >= 3 && fixture.Wheels.Take(wheelsAtSecondSolve).All(w => w < 0) && inspect >= 0 && missing > inspect &&
-                    logs.Any(l => l.Contains("下滑后暂未检测到位移")) && logs.Count(l => l.Contains("第 2 题尚未识别到完整下边界")) >= 2,
+                    logs.Any(l => l.Contains("连续未移动 1/2")) && logs.Count(l => l.Contains("第 2 题尚未识别到完整下边界")) >= 2,
                     "after checking the current viewport, a clipped next question triggers downward wheels, a missed-wheel retry, and repeated scans until complete");
                 Assert(fixture.Selected["0:B"] && fixture.Selected["1:A"] && fixture.Selected["1:D"] && !fixture.Selected["1:C"], "single choice and multi-choice exactly match answers, removing a preset wrong selection");
                 Assert(fixture.Wheels.Any(w => w > 0) && fixture.Wheels.Any(w => w < 0), "cross-page question is stitched and scrolled back to fresh option positions");

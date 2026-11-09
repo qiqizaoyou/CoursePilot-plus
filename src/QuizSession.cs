@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -15,7 +15,7 @@ namespace CoursePilot
         Task<bool> TryRun(Bitmap screen, CancellationToken cancellation);
     }
 
-    internal sealed class QuizNavigator : IDisposable
+    internal sealed partial class QuizNavigator : IDisposable
     {
         private readonly IDesktop desktop;
         private readonly IQuizOcr ocr;
@@ -118,73 +118,6 @@ namespace CoursePilot
                     .Concat(Current.Text.Words.Select(w => w.Text + " " + w.Bounds)));
             }
             catch { log("选项识别诊断未能写入磁盘。"); }
-        }
-        internal async Task<bool> Scroll(int direction, CancellationToken cancellation, int confirmations = 2, int screenDivisions = 4)
-        {
-            if (++moves > 1000) throw new QuizPauseException("测验滚动次数异常，已暂停，请检查是否有遮挡或无法识别的题目。");
-            int lines = Forms.SystemInformation.MouseWheelScrollLines;
-            if (lines < 1) throw new QuizPauseException("系统滚轮设置为整页或禁用，请改为每次滚动若干行。");
-            int wheelNotches = -direction * ScreenNotches(screenSize, lines, screenDivisions);
-            int safeBottom = Math.Min(area.Bottom, (int)(screenSize.Height * .8));
-            Rectangle comparison = Rectangle.FromLTRB(area.Left, area.Top, area.Right, safeBottom);
-            if (comparison.Height <= 20) throw new QuizPauseException("测验内容区域过低，请重新校准。");
-            int unchangedAttempts = 0;
-            for (int attempt = 0; attempt < 3; attempt++)
-            {
-                cancellation.ThrowIfCancellationRequested();
-                QuizPage next;
-                bool unchanged, matchesCurrent = false;
-                Stopwatch watch = Stopwatch.StartNew();
-                using (Bitmap before = await QuizCapture.Read(desktop, area, clock, cancellation).ConfigureAwait(false))
-                {
-                    if (before.Size != screenSize) throw new QuizPauseException("屏幕尺寸发生变化。");
-                    cancellation.ThrowIfCancellationRequested();
-                    watch.Restart();
-                    desktop.Scroll(new Point(area.Left + area.Width / 2, area.Top + area.Height / 2), wheelNotches);
-                    await clock.Delay(1100, cancellation).ConfigureAwait(false);
-                    cancellation.ThrowIfCancellationRequested();
-                    watch.Stop();
-                    using (Bitmap after = await QuizCapture.Read(desktop, area, clock, cancellation).ConfigureAwait(false))
-                    {
-                        if (after.Size != screenSize) throw new QuizPauseException("屏幕尺寸发生变化。");
-                        using (Bitmap first = before.Clone(comparison, PixelFormat.Format24bppRgb))
-                        using (Bitmap second = after.Clone(comparison, PixelFormat.Format24bppRgb))
-                        {
-                            unchanged = watch.ElapsedMilliseconds <= 2000 && Recognition.SameFrame(first, second);
-                            if (unchanged)
-                            {
-                                // A previous wheel can take effect before the next pair of captures.
-                                using (Bitmap current = Current.Image.Clone(new Rectangle(Point.Empty, comparison.Size), PixelFormat.Format24bppRgb))
-                                    matchesCurrent = Recognition.SameFrame(current, second);
-                            }
-                        }
-                        next = await Read(after, cancellation).ConfigureAwait(false);
-                    }
-                }
-                try
-                {
-                    int shift = matchesCurrent ? 0 : QuizVision.ScrollShift(Current, next, direction);
-                    bool moved = Math.Abs(shift) > 5;
-                    if (moved || unchanged)
-                    {
-                        next.Top = moved ? Math.Max(0, Current.Top + shift) : Current.Top;
-                        document.Add(next);
-                        Current.Dispose();
-                        Current = next;
-                    }
-                    if (moved)
-                    {
-                        document.BottomConfirmed = false;
-                        log(direction > 0 ? "测验内容向下滚动约 1/" + screenDivisions + " 屏，已匹配重叠文字。" : "返回作答位置，已重新匹配题目。");
-                        return true;
-                    }
-                    unchangedAttempts = unchanged ? unchangedAttempts + 1 : 0;
-                    if (unchangedAttempts == confirmations) return false;
-                    if (unchanged && attempt < 2) log(direction > 0 ? "下滑后暂未检测到位移，再向下滚动约 1/" + screenDivisions + " 屏并重新识别。" : "返回作答位置时暂未检测到位移，再试一次。");
-                }
-                finally { if (!ReferenceEquals(Current, next)) next.Dispose(); }
-            }
-            throw new QuizPauseException("无法确认滚动位置或页面持续变化，请检查弹窗与测验区域。");
         }
         internal async Task RestartFromTop(CancellationToken cancellation)
         {
@@ -491,7 +424,7 @@ namespace CoursePilot
             }
             catch { result.Dispose(); throw; }
         }
-        public void Dispose() { if (Current != null) Current.Dispose(); if (verifiedFillImage != null) verifiedFillImage.Dispose(); if (choiceAnchor != null) choiceAnchor.Dispose(); }
+        public void Dispose() { if (ScrollFailureImage != null) ScrollFailureImage.Dispose(); if (Current != null) Current.Dispose(); if (verifiedFillImage != null) verifiedFillImage.Dispose(); if (choiceAnchor != null) choiceAnchor.Dispose(); }
     }
 
     public sealed class ChapterQuiz : IQuizHandler, IQuizCompletion, ICoursePageSource
@@ -708,8 +641,17 @@ namespace CoursePilot
                             completed.Clear();
                             continue;
                         }
-                        log((document.PendingReason ?? "正在寻找下一题的完整边界") + "，继续向下滚动约 1/8 屏并重新识别。");
-                        await Advance(navigator, document, cancellation).ConfigureAwait(false);
+                        bool allCompleted = completed.Count == document.Expected;
+                        string stage = allCompleted ? "全部 " + completed.Count + " 题已完成，正在确认页尾并准备提交。"
+                            : (document.PendingReason ?? "正在寻找下一题的完整边界") + "，继续向下滚动约 1/8 屏并重新识别。";
+                        log(stage);
+                        if (allCompleted) preview(header, navigator.Current.Image, completed.Count, stage);
+                        try { await Advance(navigator, document, cancellation).ConfigureAwait(false); }
+                        catch (QuizPauseException e)
+                        {
+                            preview(header, navigator.ScrollFailureImage ?? navigator.Current.Image, completed.Count, "页尾确认暂停 · 最新截图 · " + e.Message);
+                            throw;
+                        }
                     }
                 }
             }

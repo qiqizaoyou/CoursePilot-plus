@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -48,7 +49,8 @@ namespace CoursePilot
         // green circles are deliberately retained as holes rather than separate dots.
         public static List<Dot> FindDots(Bitmap input, bool chapterList)
         {
-            return FindDotsCore(input, chapterList, false);
+            List<Dot> dots = FindDotsCore(input, chapterList, false);
+            return chapterList ? DirectoryColumn(input, dots) : dots;
         }
 
         public static List<Dot> FindTaskDots(Bitmap input)
@@ -58,7 +60,7 @@ namespace CoursePilot
 
         private static List<Dot> FindDotsCore(Bitmap input, bool chapterList, bool taskPoint)
         {
-            double scale = Math.Min(1.0, 960.0 / input.Width);
+            double scale = Math.Min(1.0, 1920.0 / input.Width);
             int width = Math.Max(1, (int)Math.Round(input.Width * scale));
             int height = Math.Max(1, (int)Math.Round(input.Height * scale));
             using (Bitmap small = new Bitmap(width, height, PixelFormat.Format24bppRgb))
@@ -69,7 +71,7 @@ namespace CoursePilot
                 Marshal.Copy(data.Scan0, pixels, 0, pixels.Length);
                 small.UnlockBits(data);
                 byte[] mask = new byte[width * height];
-                int scanWidth = chapterList ? Math.Max(1, (int)(width * 0.18)) : width;
+                int scanWidth = width;
                 for (int y = 0; y < height; y++)
                     for (int x = 0; x < scanWidth; x++)
                     {
@@ -80,8 +82,8 @@ namespace CoursePilot
                     }
                 List<Dot> result = new List<Dot>();
                 int[] queue = new int[width * height];
-                int minSize = Math.Max(7, (int)Math.Round((taskPoint ? Math.Min(input.Width, input.Height) * 0.12 : input.Width * (chapterList ? 0.010 : 0.025)) * scale));
-                int maxSize = Math.Max(minSize + 3, (int)Math.Round((taskPoint ? Math.Min(input.Width, input.Height) * 0.95 : input.Width * (chapterList ? 0.050 : 0.18)) * scale));
+                int minSize = Math.Max(4, (int)Math.Round((taskPoint ? Math.Min(input.Width, input.Height) * 0.12 : 8) * scale));
+                int maxSize = Math.Max(minSize + 3, (int)Math.Round((taskPoint ? Math.Min(input.Width, input.Height) * 0.95 : 140) * scale));
                 for (int y = 0; y < height; y++)
                     for (int x = 0; x < scanWidth; x++)
                     {
@@ -122,6 +124,24 @@ namespace CoursePilot
             return screen.Clone(region.ToPixels(screen.Size), PixelFormat.Format24bppRgb);
         }
 
+        // A wider crop is supported, but multiple plausible status columns are ambiguous.
+        internal static List<Dot> DirectoryColumn(Bitmap image, List<Dot> candidates)
+        {
+            List<List<Dot>> columns = new List<List<Dot>>();
+            foreach (Dot dot in candidates.OrderBy(d => d.Center.X))
+            {
+                if (TitleKey(image, dot, true) == null) continue;
+                List<Dot> column = columns.FirstOrDefault(c => Math.Abs(c[0].Center.X - dot.Center.X) <= Math.Max(8, c[0].Bounds.Width * .6)
+                    && dot.Bounds.Width >= c[0].Bounds.Width * .6 && dot.Bounds.Width <= c[0].Bounds.Width * 1.6);
+                if (column == null) { column = new List<Dot>(); columns.Add(column); }
+                column.Add(dot);
+            }
+            if (columns.Count != 1) return new List<Dot>();
+            return columns[0].OrderBy(d => d.Center.Y).ToList();
+        }
+
+        internal static List<Dot> DirectoryCandidates(Bitmap image) { return FindDotsCore(image, true, false); }
+
         public static Rectangle ScrollComparisonBounds(Size screen, Region list)
         {
             Rectangle area = list.ToPixels(screen);
@@ -132,6 +152,9 @@ namespace CoursePilot
         // Identify a directory row by its title pixels, excluding the colored dot
         // and screen coordinates so the same title can be skipped after scrolling.
         public static string LessonKey(Bitmap list, Dot dot)
+        { return TitleKey(list, dot, false); }
+
+        private static string TitleKey(Bitmap list, Dot dot, bool requireTitle)
         {
             int left = Math.Min(list.Width - 1, dot.Bounds.Right + Math.Max(6, (int)Math.Round(dot.Bounds.Width * 0.3)));
             int halfHeight = Math.Max(10, (int)Math.Round(dot.Bounds.Height * 0.85));
@@ -156,6 +179,9 @@ namespace CoursePilot
                     }
                 if (x2 < x1 || y2 < y1) return null;
                 int inkWidth = x2 - x1 + 1, inkHeight = y2 - y1 + 1;
+                // A tiny neighboring decoration (for example an assistant's other shoe)
+                // is not a course title and must not create a second status column.
+                if (requireTitle && inkWidth < dot.Bounds.Width * 2) return null;
                 byte[] signature = new byte[8 + inkWidth * inkHeight];
                 Buffer.BlockCopy(BitConverter.GetBytes(inkWidth), 0, signature, 0, 4);
                 Buffer.BlockCopy(BitConverter.GetBytes(inkHeight), 0, signature, 4, 4);

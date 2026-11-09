@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
@@ -23,8 +23,8 @@ using FontFamily = System.Windows.Media.FontFamily;
 
 [assembly: AssemblyTitle("随课 · CoursePilot")]
 [assembly: AssemblyDescription("课程视频监测与 DeepSeek 章节测验解答复核工具")]
-[assembly: AssemblyVersion("0.6.12.0")]
-[assembly: AssemblyFileVersion("0.6.12.0")]
+[assembly: AssemblyVersion("0.6.13.0")]
+[assembly: AssemblyFileVersion("0.6.13.0")]
 
 namespace CoursePilot
 {
@@ -34,6 +34,7 @@ namespace CoursePilot
         public static int Main(string[] args)
         {
             if (args.Length > 0 && args[0] == "--self-test") return SelfTests.Run(args);
+            if (args.Length > 0 && args[0] == "--compatibility-test") return SelfTests.RunCompatibility(args);
             if (args.Length > 0 && args[0] == "--render-ui") return SelfTests.Render(args);
             bool fresh;
             using (Mutex mutex = new Mutex(true, "Local\\CoursePilot_Desktop_0_1", out fresh))
@@ -67,7 +68,7 @@ namespace CoursePilot
         }
     }
 
-    public sealed class MainController
+    public sealed partial class MainController
     {
         public readonly Window Window;
         private Regions regions = new Regions();
@@ -98,18 +99,14 @@ namespace CoursePilot
             picker.SelectedIndex = Array.FindIndex(screens, s => s.Primary);
             if (picker.SelectedIndex < 0) picker.SelectedIndex = 0;
             LoadRegions();
+            calibration = CalibrationProfile.Load(CalibrationPath);
             try { deepSeekKey = keyStore.Load(); } catch { Log("本机 DeepSeek 密钥无法解密，请重新设置。"); }
             try { glmKey = glmStore.Key.Load(); glmModel = glmStore.LoadModel(); } catch { Log("本机 GLM 配置无法读取，请重新设置。"); }
             UpdateDeepSeekHint();
-            picker.SelectionChanged += delegate { regions = new Regions(); ResetConfirmation(); UpdateRegionHint(); Log("已切换目标屏幕，识别区域恢复为截图参考比例，请重新确认。"); };
-            Control<Button>("ConfirmButton").Click += delegate
-            {
-                Control<Button>("ConfirmButton").Content = "已确认目标页面  ✓";
-                Control<Button>("ConfirmButton").IsEnabled = false;
-                Control<Button>("StartButton").IsEnabled = true;
-                SetStatus("等待开始", "页面已确认");
-                Log("已确认目标页面，点击开始后将自动最小化窗口。");
-            };
+            picker.SelectionChanged += delegate { regions = new Regions(); ResetCalibration(); ResetConfirmation(); UpdateRegionHint(); CalibrationHint(); Log("已切换目标屏幕，请重新手动框选并确认全部区域。"); };
+            Control<Button>("ConfirmButton").Click += async delegate { await Preflight(false); };
+            Control<Button>("GuideButton").Click += async delegate { await SetupWizard(); };
+            Control<Button>("DiagnosticButton").Click += async delegate { await Preflight(true); };
             Control<Button>("StartButton").Click += async delegate { await Start(); };
             Control<Button>("StopButton").Click += delegate { Stop(); };
             Control<Button>("ManualContinueButton").Click += delegate
@@ -133,11 +130,12 @@ namespace CoursePilot
                 GlmSettingsWindow settings = new GlmSettingsWindow(Window, glmKey, glmModel, glmStore);
                 if (settings.ShowDialog() == true) { glmKey = settings.ResultKey; glmModel = settings.ResultModel; UpdateDeepSeekHint(); }
             };
-            Control<Button>("DefaultRegionsButton").Click += delegate { regions = new Regions(); SaveRegions(); UpdateRegionHint(); ResetConfirmation(); Log("已恢复您提供的截图比例。"); };
+            Control<Button>("DefaultRegionsButton").Click += delegate { regions = new Regions(); ResetCalibration(); SaveRegions(); UpdateRegionHint(); CalibrationHint(); ResetConfirmation(); Log("已重置参考框；全部区域需重新手动画框确认。"); };
             Window.SourceInitialized += delegate
             {
                 source = HwndSource.FromHwnd(new WindowInteropHelper(Window).Handle);
                 source.AddHook(WindowMessage);
+                CalibrationReview.Fit(Window);
             };
             Window.Closing += OnClosing;
             Window.Closed += delegate
@@ -146,7 +144,8 @@ namespace CoursePilot
                 if (floating != null) floating.Close();
             };
             UpdateRegionHint();
-            Log("准备就绪。请在所选屏幕打开课程目录页。");
+            CalibrationHint();
+            Log("首次使用请点击“手动引导”，依次框选并确认目录、课程页、测验页的全部 7 个区域，再返回目录预检。");
         }
 
         private IntPtr WindowMessage(IntPtr hwnd, int msg, IntPtr wparam, IntPtr lparam, ref bool handled)
@@ -180,7 +179,7 @@ namespace CoursePilot
 
         private void ResetConfirmation()
         {
-            Control<Button>("ConfirmButton").Content = "确认进入目标页面";
+            Control<Button>("ConfirmButton").Content = "确认并预检目录页";
             Control<Button>("ConfirmButton").IsEnabled = true;
             Control<Button>("StartButton").IsEnabled = false;
             SetStatus("等待确认", "准备就绪");
@@ -195,6 +194,9 @@ namespace CoursePilot
             Control<Button>("DeepSeekSettingsButton").IsEnabled = enabled;
             Control<Button>("GlmSettingsButton").IsEnabled = enabled;
             Control<Button>("DefaultRegionsButton").IsEnabled = enabled;
+            Control<Button>("GuideButton").IsEnabled = enabled;
+            Control<Button>("DiagnosticButton").IsEnabled = enabled;
+            Control<ComboBox>("DiagnosticKind").IsEnabled = enabled;
             Control<Button>("ConfirmButton").IsEnabled = false;
             Control<Button>("StartButton").IsEnabled = false;
             Control<Button>("StopButton").IsEnabled = !enabled;
@@ -216,13 +218,21 @@ namespace CoursePilot
             {
                 Directory.CreateDirectory(dataDirectory);
                 Window.WindowState = WindowState.Minimized;
-                ShowFloating(screen);
                 for (int seconds = 3; seconds > 0; seconds--)
                 {
                     Log(String.Format("{0} 秒后开始截图，请保持课程目录页无遮挡。", seconds));
                     await Task.Delay(1000, token);
                 }
-                WindowsDesktop desktop = new WindowsDesktop(screen.Bounds);
+                screen = Forms.Screen.FromHandle(Native.GetForegroundWindow());
+                CalibrationEnvironment environment = CalibrationEnvironment.Capture(screen, Native.GetForegroundWindow());
+                if (!calibration.Ready(regions, environment)) throw new QuizPauseException("7 个区域尚未全部确认，或屏幕/缩放/窗口布局已变化。请执行手动引导后重新预检。");
+                WindowsDesktop desktop = new WindowsDesktop(screen.Bounds, environment.Guard);
+                using (Bitmap shot = desktop.Capture())
+                {
+                    CalibrationReport report = await CalibrationProbe.Inspect(shot, regions, 0, new WindowsQuizOcr(), token);
+                    if (!report.Passed) throw new QuizPauseException("开始前目录复查未通过：" + report.Summary());
+                }
+                ShowFloating(screen);
                 SessionClock clock = new SessionClock();
                 ChapterQuiz quiz = new ChapterQuiz(desktop, regions, new WindowsQuizOcr(), clock,
                     delegate { return DualQuizModel.Create(deepSeekKey, glmKey, glmModel, Log, PreviewDecision); }, Log, PreviewQuiz,
@@ -438,26 +448,7 @@ namespace CoursePilot
 
         private async Task Calibrate(bool coursePage, bool quizPage = false)
         {
-            if (running) return;
-            Forms.Screen screen = screens[Control<ComboBox>("ScreenPicker").SelectedIndex];
-            ToggleControls(false); Control<Button>("StopButton").IsEnabled = false;
-            try
-            {
-                Window.WindowState = WindowState.Minimized;
-                await Task.Delay(500);
-                using (Bitmap shot = new WindowsDesktop(screen.Bounds).Capture())
-                {
-                    RegionSelector selector = new RegionSelector(shot, screen.Bounds, regions, coursePage, quizPage);
-                    if (selector.ShowDialog() == true)
-                    {
-                        regions = selector.Result;
-                        SaveRegions(); UpdateRegionHint();
-                        Log(quizPage ? "测验标题区与内容区已校准；请回到目录后重新确认。" : coursePage ? "课程页的任务点、视频和返回文字区域已校准；请回到目录后重新确认。" : "目录页的两个识别区域已校准，请重新确认目标页面。");
-                    }
-                }
-            }
-            catch (Exception exception) { Log("无法校准区域：" + exception.Message); }
-            finally { ToggleControls(true); Control<Button>("StopButton").IsEnabled = false; ResetConfirmation(); Window.WindowState = WindowState.Normal; Window.Activate(); }
+            await RunCalibration(quizPage ? 2 : coursePage ? 1 : 0);
         }
 
         private void UpdateRegionHint()
@@ -468,7 +459,7 @@ namespace CoursePilot
             Control<TextBlock>("RegionHint").Text = String.Format("区域1 {0} × {1}  /  区域2 {2} × {3} px，可手动调整。", list.Width, list.Height, status.Width, status.Height);
         }
 
-        private void SaveRegions()
+        private bool SaveRegions()
         {
             try
             {
@@ -479,8 +470,9 @@ namespace CoursePilot
                         c.X, c.Y, c.Width, c.Height, d.X, d.Y, d.Width, d.Height, e.X, e.Y, e.Width, e.Height,
                         f.X, f.Y, f.Width, f.Height, g.X, g.Y, g.Width, g.Height }.ConvertAllInvariant()) };
                 File.WriteAllLines(System.IO.Path.Combine(dataDirectory, "regions.ini"), lines);
+                return true;
             }
-            catch (Exception exception) { Log("区域配置未能保存：" + exception.Message); }
+            catch (Exception exception) { Log("区域配置未能保存：" + exception.Message); return false; }
         }
 
         private void LoadRegions()
@@ -495,7 +487,7 @@ namespace CoursePilot
                 double[] v = Array.ConvertAll(values, x => double.Parse(x, CultureInfo.InvariantCulture));
                 for (int i = 0; i < v.Length; i++) if (double.IsNaN(v[i]) || double.IsInfinity(v[i]) || v[i] < 0 || v[i] > 1) return;
                 for (int i = 0; i < v.Length; i += 4)
-                    if (v[i + 2] < 0.005 || v[i + 3] < 0.005 || v[i] + v[i + 2] > 1.001 || v[i + 1] + v[i + 3] > 1.001) return;
+                    if (v[i + 2] <= 0 || v[i + 3] <= 0 || v[i] + v[i + 2] > 1.001 || v[i + 1] + v[i + 3] > 1.001) return;
                 Control<ComboBox>("ScreenPicker").SelectedIndex = screen;
                 regions.List = new Region(v[0], v[1], v[2], v[3]); regions.Status = new Region(v[4], v[5], v[6], v[7]);
                 if (v.Length >= 20)
@@ -568,7 +560,7 @@ namespace CoursePilot
             KeyDown += delegate(object sender, System.Windows.Input.KeyEventArgs e) { if (e.Key == Key.Escape) DialogResult = false; };
             drawing.MouseLeftButtonDown += delegate(object sender, MouseButtonEventArgs e)
             {
-                start = e.GetPosition(drawing); dragging = true; drawing.CaptureMouse();
+                start = Bound(e.GetPosition(drawing)); dragging = true; drawing.CaptureMouse();
                 current = new System.Windows.Shapes.Rectangle { Stroke = Brushes.White, StrokeThickness = 2, Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(30, 255, 255, 255)) };
                 drawing.Children.Add(current); Canvas.SetLeft(current, start.X); Canvas.SetTop(current, start.Y);
             };
@@ -586,7 +578,8 @@ namespace CoursePilot
             {
                 if (!dragging) return;
                 dragging = false; drawing.ReleaseMouseCapture();
-                if (current.Width < 35 || current.Height < 25) { drawing.Children.Remove(current); return; }
+                bool small = quizPage ? false : coursePage ? step != 1 : step == 1;
+                if (double.IsNaN(current.Width) || double.IsNaN(current.Height) || current.Width < (small ? 8 : 35) || current.Height < (small ? 8 : 25)) { drawing.Children.Remove(current); message.Text = Prompt() + "（刚才的框太小，请重新画框）"; return; }
                 Region region = new Region(Canvas.GetLeft(current) / drawing.ActualWidth, Canvas.GetTop(current) / drawing.ActualHeight, current.Width / drawing.ActualWidth, current.Height / drawing.ActualHeight);
                 if (quizPage) { if (step == 0) Result.QuizHeader = region; else Result.QuizBody = region; }
                 else if (coursePage)

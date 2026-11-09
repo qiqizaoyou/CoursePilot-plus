@@ -4,7 +4,7 @@ $projectRoot = $PSScriptRoot
 $framework = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $compiler = Join-Path $framework 'csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) { throw '未找到 Windows .NET Framework 4.x 编译器。' }
-$output = Join-Path $projectRoot 'dist\v0.6.12'
+$output = Join-Path $projectRoot 'dist\v0.6.13'
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 $references = @('System.dll','System.Core.dll','System.Drawing.dll','System.Windows.Forms.dll','System.Xaml.dll','System.Security.dll','System.Net.Http.dll','System.Web.Extensions.dll','System.Runtime.WindowsRuntime.dll','System.Runtime.InteropServices.WindowsRuntime.dll') | ForEach-Object { '/reference:' + (Join-Path $framework $_) }
 $metadata = Join-Path $env:WINDIR 'System32\WinMetadata'
@@ -19,4 +19,6 @@ $compilerArgs = @('/nologo','/target:winexe','/platform:x64','/optimize+','/warn
 if ($LASTEXITCODE -ne 0) { throw '编译失败。' }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'src\app.config') -Destination (Join-Path $output '随课.exe.config') -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot '使用说明.txt') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'COMPATIBILITY.md') -Destination $output -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $output -Force
 Write-Output ('已生成：' + (Join-Path $output '随课.exe'))

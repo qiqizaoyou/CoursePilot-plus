@@ -1,4 +1,4 @@
-﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="随课 · CoursePilot" Width="1136" Height="860" MinWidth="1040" MinHeight="640"
         WindowStartupLocation="CenterScreen" Background="#F6F6F6"
@@ -44,9 +44,11 @@
     </Style>
   </Window.Resources>
   <Grid Background="#F6F6F6">
+    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <Grid.ColumnDefinitions><ColumnDefinition Width="188"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-    <Border Background="#FCFCFC" BorderBrush="#E4E4E4" BorderThickness="0,0,1,0">
-      <Grid Margin="22,30,20,24">
+    <Border Grid.RowSpan="2" Background="#FCFCFC" BorderBrush="#E4E4E4" BorderThickness="0,0,1,0">
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <Grid Margin="22,30,20,24" MinHeight="620">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <StackPanel>
           <StackPanel Orientation="Horizontal">
@@ -68,12 +70,13 @@
         <StackPanel Grid.Row="2">
           <Border Height="1" Background="#E8E8E8" Margin="0,0,0,17"/>
           <TextBlock Text="本地识别 · 双模型审核" Foreground="#777777" FontSize="11"/>
-          <TextBlock Text="Windows 11  ·  v0.6.12" Foreground="#A0A0A0" FontSize="10" Margin="0,6,0,0"/>
+          <TextBlock Text="Windows 11  ·  v0.6.13" Foreground="#A0A0A0" FontSize="10" Margin="0,6,0,0"/>
         </StackPanel>
       </Grid>
+      </ScrollViewer>
     </Border>
-    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-    <Grid Margin="30,27,30,22" MinHeight="750">
+    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+    <Grid Margin="30,27,30,22" MinHeight="750" MinWidth="820">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="120"/><RowDefinition Height="Auto"/>
       </Grid.RowDefinitions>
@@ -85,13 +88,22 @@
       </Grid>
       <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,24,0,20" Padding="18,15">
         <Grid>
+          <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
           <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <StackPanel><TextBlock Text="目标屏幕" FontSize="11" Foreground="#888888" Margin="0,0,0,7"/><ComboBox x:Name="ScreenPicker" MaxWidth="360" HorizontalAlignment="Left" MinWidth="290"/></StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom">
             <Button x:Name="CalibrateButton" Content="目录区域" Height="34" FontSize="12" Margin="0,0,8,0" ToolTip="在目录页校准章节列表与整体状态点"/>
             <Button x:Name="CalibrateCourseButton" Content="课程页区域" Height="34" FontSize="12" Margin="0,0,8,0" ToolTip="请先打开课程页，再校准任务圆点、视频和返回文字"/>
             <Button x:Name="CalibrateQuizButton" Content="测验区域" Height="34" FontSize="12" Margin="0,0,8,0" ToolTip="在章节测验顶部校准标题状态区和整个题目内容视口"/>
-            <Button x:Name="DefaultRegionsButton" Content="恢复默认" Height="34" FontSize="12"/>
+            <Button x:Name="DefaultRegionsButton" Content="重置区域" Height="34" FontSize="12"/>
+          </StackPanel>
+          <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,12,0,0">
+            <WrapPanel>
+              <Button x:Name="GuideButton" Content="手动引导 · 框选全部区域" Style="{StaticResource Primary}" Height="34" FontSize="12" Margin="0,0,8,6"/>
+              <ComboBox x:Name="DiagnosticKind" SelectedIndex="0" Width="100" Margin="0,0,8,6"><ComboBoxItem Content="目录页"/><ComboBoxItem Content="课程页"/><ComboBoxItem Content="测验页"/></ComboBox>
+              <Button x:Name="DiagnosticButton" Content="只识别 / 导出诊断" Height="34" FontSize="12" Margin="0,0,0,6"/>
+            </WrapPanel>
+            <TextBlock x:Name="CalibrationHint" Text="首次使用：7 个区域均需手动框选并确认" FontSize="11" Foreground="#777777" TextWrapping="Wrap"/>
           </StackPanel>
         </Grid>
       </Border>
@@ -138,16 +150,11 @@
               <TextBlock Text="开始本次任务" FontSize="15" FontWeight="SemiBold"/>
               <TextBlock Text="先打开课程目录页，并保持目标页面无遮挡。" Foreground="#888888" FontSize="12" TextWrapping="Wrap" LineHeight="22" Margin="0,12,0,21"/>
               <TextBlock Text="第 1 步 · 确认页面" Foreground="#999999" FontSize="10" Margin="0,0,0,8"/>
-              <Button x:Name="ConfirmButton" Content="确认进入目标页面"/>
+              <Button x:Name="ConfirmButton" Content="确认并预检目录页"/>
               <TextBlock Text="第 2 步 · 开始运行" Foreground="#999999" FontSize="10" Margin="0,19,0,8"/>
               <Button x:Name="StartButton" Content="确定开始刷课挂机  →" Style="{StaticResource Primary}" IsEnabled="False" Height="43"/>
               <TextBlock x:Name="RunHint" Text="开始后窗口自动最小化，预留 3 秒切换页面。" Foreground="#999999" TextWrapping="Wrap" FontSize="10" LineHeight="18" Margin="0,10,0,0"/>
               </StackPanel>
-            </StackPanel>
-            <StackPanel Grid.Row="2" Margin="0,16,0,0">
-              <Border Height="1" Background="#EEEEEE" Margin="0,0,0,14"/>
-              <Grid><TextBlock Text="随时停止" Foreground="#777777" FontSize="11" VerticalAlignment="Center"/><Border HorizontalAlignment="Right" BorderBrush="#DDDDDD" BorderThickness="1" CornerRadius="4" Padding="7,3"><TextBlock Text="F8" FontSize="10" Foreground="#777777"/></Border></Grid>
-              <Button x:Name="StopButton" Content="停止任务" Margin="0,11,0,0" Height="34" IsEnabled="False" FontSize="12"/>
             </StackPanel>
           </Grid>
         </Border>
@@ -164,5 +171,11 @@
       <Grid Grid.Row="4" Margin="1,13,1,0"><TextBlock Text="视频自动监测 · 测验自动提交，漏题补查一次。" FontSize="10" Foreground="#999999"/><TextBlock Text="题目图发往 DeepSeek 与智谱" FontSize="10" Foreground="#AAAAAA" HorizontalAlignment="Right"/></Grid>
     </Grid>
     </ScrollViewer>
+    <Border Grid.Row="1" Grid.Column="1" Background="White" BorderBrush="#E5E5E5" BorderThickness="0,1,0,0" Padding="22,8">
+      <DockPanel>
+        <Button x:Name="StopButton" DockPanel.Dock="Right" Content="停止任务" Width="140" Height="34" IsEnabled="False" FontSize="12"/>
+        <TextBlock Text="随时按 F8 停止" Foreground="#777777" FontSize="11" VerticalAlignment="Center"/>
+      </DockPanel>
+    </Border>
   </Grid>
 </Window>

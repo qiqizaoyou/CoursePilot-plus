@@ -33,10 +33,13 @@ namespace CoursePilot
     public sealed class WindowsDesktop : IDesktop, ITextDesktop, ITextReadDesktop, IPointerDesktop
     {
         private readonly Rectangle bounds;
-        public WindowsDesktop(Rectangle bounds) { this.bounds = bounds; }
+        private readonly Action guard;
+        public WindowsDesktop(Rectangle bounds, Action guard = null) { this.bounds = bounds; this.guard = guard; }
+        private void CheckEnvironment() { if (guard != null) guard(); }
 
         public Bitmap Capture()
         {
+            CheckEnvironment();
             Bitmap bitmap = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format24bppRgb);
             try { using (Graphics graphics = Graphics.FromImage(bitmap)) graphics.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size); return bitmap; }
             catch { bitmap.Dispose(); throw; }
@@ -44,13 +47,14 @@ namespace CoursePilot
 
         private void Move(Point point)
         {
+            CheckEnvironment();
             if (!Native.SetCursorPos(bounds.Left + point.X, bounds.Top + point.Y)) throw new InvalidOperationException("无法移动鼠标，请检查当前桌面状态。");
         }
 
         public void MovePointer(Point point) { Move(point); }
 
         public Task<string> ReadFocusedText(CancellationToken cancellation)
-        { return ClipboardTextReader.ReadAsync(cancellation); }
+        { CheckEnvironment(); return ClipboardTextReader.ReadAsync(cancellation); }
 
         public void Click(Point point)
         {
@@ -67,6 +71,7 @@ namespace CoursePilot
 
         public void ReplaceText(string text, CancellationToken cancellation)
         {
+            CheckEnvironment();
             cancellation.ThrowIfCancellationRequested();
             IntPtr target = Native.GetForegroundWindow();
             if (target == IntPtr.Zero) throw new QuizPauseException("输入框未能获得焦点，已暂停。");

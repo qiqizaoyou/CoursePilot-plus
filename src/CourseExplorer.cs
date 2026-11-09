@@ -34,6 +34,29 @@ namespace CoursePilot
         }
         private void Fail(Surface screen, string reason)
         { source.ReportCourseIssue(screen.Image, reason + "\r\n" + screen.Evidence.Describe()); throw new QuizPauseException(reason); }
+        private static bool QuizChange(Surface page, CourseTaskTarget target)
+        {
+            if (!page.Evidence.QuizConfirmed) return false;
+            bool originalTask = page.Evidence.Tasks.Any(t => Math.Abs(t.Task.Top - target.Task.Top) <= 8 && Math.Abs(t.Task.Left - target.Task.Left) <= 8);
+            return page.Evidence.QuizOutsideVideo || !originalTask;
+        }
+        // A single frame is never a confirmed page transition. Return true when the
+        // caller must discard its first frame and re-read current task/video pixels.
+        private async Task<bool> VerifyQuizChange(Surface first, CourseTaskTarget target, Size size, CancellationToken token)
+        {
+            if (!QuizChange(first, target)) return false;
+            string reason = "疑似切换到测验，复查 1/2；等待 5 秒，不点击或滚动。";
+            log(reason + "\r\n" + first.Evidence.Describe()); source.ReportCourseIssue(first.Image, reason + "\r\n" + first.Evidence.Describe());
+            await clock.Delay(5000, token).ConfigureAwait(false);
+            using (Surface retry = await Read(token).ConfigureAwait(false))
+            {
+                if (retry.Image.Size != size) Fail(retry, "页面变化复查期间屏幕尺寸变化，已暂停。");
+                if (QuizChange(retry, target)) Fail(retry, "连续两次确认页面出现测验组合证据，已暂停，未操作测验。");
+                log("页面变化复查 2/2 未确认测验切换，重新读取原视频任务点。\r\n" + retry.Evidence.Describe());
+                source.ReportCourseIssue(retry.Image, "页面变化复查 2/2 未确认切换\r\n" + retry.Evidence.Describe());
+            }
+            return true;
+        }
         internal async Task<CourseStudyResult> Run(CancellationToken token)
         {
             CourseTaskTarget target = null;
@@ -57,9 +80,10 @@ namespace CoursePilot
         private async Task<bool> Watch(CourseTaskTarget target, CancellationToken token)
         {
             Size size;
+            for (;;)
             using (Surface fresh = await Read(token).ConfigureAwait(false))
             {
-                if (fresh.Evidence.QuizClues) Fail(fresh, "播放前页面出现测验内容，已暂停，未点击视频区域。");
+                if (await VerifyQuizChange(fresh, target, fresh.Image.Size, token).ConfigureAwait(false)) continue;
                 CourseTaskTarget[] matches = fresh.Evidence.Tasks.Where(t => Math.Abs(t.Task.Top - target.Task.Top) <= 8 && Math.Abs(t.Task.Left - target.Task.Left) <= 8).ToArray();
                 if (matches.Length != 1) Fail(fresh, "播放前任务点位置变化，已暂停，请重新确认页面。");
                 target = matches[0];
@@ -69,6 +93,7 @@ namespace CoursePilot
                 Point click = new Point(target.Video.Left + target.Video.Width / 2, target.Video.Top + target.Video.Height / 2);
                 token.ThrowIfCancellationRequested(); desktop.Click(click);
                 log("已点击已保存的课程页区域2中心（" + click.X + ", " + click.Y + "），开始 10 / 20 / 30 秒截图验证。");
+                break;
             }
             long started = clock.Milliseconds, nextCheck = started + timing.Check, nextSample = started + timing.Sample;
             int samples = 0; bool changed = false; Bitmap first = null;
@@ -81,7 +106,7 @@ namespace CoursePilot
                     using (Surface page = await Read(token).ConfigureAwait(false))
                     {
                         if (page.Image.Size != size) Fail(page, "播放期间屏幕尺寸变化，已暂停。");
-                        if (page.Evidence.QuizClues) Fail(page, "播放期间页面变为测验，已暂停。");
+                        if (await VerifyQuizChange(page, target, size, token).ConfigureAwait(false)) continue;
                         using (Bitmap task = page.Image.Clone(target.Task, PixelFormat.Format24bppRgb))
                         using (Bitmap video = page.Image.Clone(target.Video, PixelFormat.Format24bppRgb))
                         {
@@ -92,7 +117,8 @@ namespace CoursePilot
                                 await clock.Delay(timing.MissingTask, token).ConfigureAwait(false);
                                 using (Surface retry = await Read(token).ConfigureAwait(false))
                                 {
-                                    if (retry.Image.Size != size || retry.Evidence.QuizClues) Fail(retry, "任务点复查时页面发生变化，已暂停。");
+                                    if (retry.Image.Size != size) Fail(retry, "任务点复查时屏幕尺寸变化，已暂停。");
+                                    if (await VerifyQuizChange(retry, target, size, token).ConfigureAwait(false)) continue;
                                     CourseTaskTarget[] matches = retry.Evidence.Tasks.Where(t => Math.Abs(t.Task.Top - target.Task.Top) <= 8 && Math.Abs(t.Task.Left - target.Task.Left) <= 8).ToArray();
                                     if (matches.Length != 1) Fail(retry, "复查后仍无法确认原任务点，已暂停，未按完成跳过。");
                                     target = matches[0]; target.Video = regions.Video.ToPixels(size);

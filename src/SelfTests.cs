@@ -118,6 +118,7 @@ namespace CoursePilot
                 System.Threading.Tasks.Task.Run(delegate { return TestDirectoryCounts(output); }).GetAwaiter().GetResult();
                 System.Threading.Tasks.Task.Run(delegate { return TestFillQuestions(output); }).GetAwaiter().GetResult();
                 System.Threading.Tasks.Task.Run(delegate { return TestCourseRouting(output); }).GetAwaiter().GetResult();
+                System.Threading.Tasks.Task.Run(delegate { return TestPageTransitions(output); }).GetAwaiter().GetResult();
                 System.Threading.Tasks.Task.Run(delegate { return TestCourseLayouts(output); }).GetAwaiter().GetResult();
                 System.Threading.Tasks.Task.Run(delegate { return TestFixedPlayback(output); }).GetAwaiter().GetResult();
                 System.Threading.Tasks.Task.Run(delegate { return TestChapterQuiz(output); }).GetAwaiter().GetResult();

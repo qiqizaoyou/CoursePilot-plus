@@ -1,6 +1,6 @@
-# 在自己的电脑上设置区域
+﻿# 在自己的电脑上设置区域
 
-适用 v0.6.13，Windows 11 x64。程序能打开但看不到目录或任务点时，先完成本机手动引导。旧版区域及其他电脑的配置均不会自动获得确认。
+适用 v0.6.14，Windows 11 x64。程序能打开但看不到目录或任务点时，先完成本机手动引导。旧版区域及其他电脑的配置均不会自动获得确认。
 
 ## 首次设置
 
@@ -40,7 +40,7 @@
 
 朋友可以在自己的源码目录打开 Codex，提供诊断目录并使用以下提示：
 
-> CoursePilot-plus v0.6.13 可以打开，但目录或任务点识别不通过。请读取 COMPATIBILITY.md、src/Calibration.cs、src/Recognition.cs、src/CalibrationUI.cs 及我指定的 data/compatibility 诊断目录，区分框选错误、DPI/坐标问题、图像形状过滤和 OCR 问题。先报告证据与修复方案，等待我批准。不要读取密钥文件，也不要操作真实课程。批准修改后，请通过 build.ps1 构建并运行 --compatibility-test，补充与这次故障有关的离线回归。
+> CoursePilot-plus v0.6.14 可以打开，但目录或任务点识别不通过。请读取 COMPATIBILITY.md、src/Calibration.cs、src/Recognition.cs、src/CalibrationUI.cs 及我指定的 data/compatibility 诊断目录，区分框选错误、DPI/坐标问题、图像形状过滤和 OCR 问题。先报告证据与修复方案，等待我批准。不要读取密钥文件，也不要操作真实课程。批准修改后，请通过 build.ps1 构建并运行 --compatibility-test，补充与这次故障有关的离线回归。
 
 ## 开发与离线检查
 
@@ -48,7 +48,7 @@
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
-$test = Start-Process -FilePath '.\dist\v0.6.13\随课.exe' `
+$test = Start-Process -FilePath '.\dist\v0.6.14\随课.exe' `
   -ArgumentList @('--compatibility-test', 'artifacts\compatibility-test') `
   -WindowStyle Hidden -Wait -PassThru
 Get-Content '.\artifacts\compatibility-test\test-results.txt'

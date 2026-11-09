@@ -106,7 +106,7 @@ namespace CoursePilot
             {
                 RoutingDesktop desktop = new RoutingDesktop { NextCapture = delegate { return (Bitmap)blank.Clone(); } };
                 RoutingOcr ocr = new RoutingOcr { ReadPage = delegate
-                { return desktop.Captures == 0 ? RoutingText() : RoutingText("章节测验"); } };
+                { return desktop.Captures == 0 ? RoutingText() : RoutingText("章节测验", "题量：5"); } };
                 OfflineClock clock = new OfflineClock(); int models = 0; bool enteredQuiz = false;
                 ChapterQuiz quiz = new ChapterQuiz(desktop, regions, ocr, clock, delegate { models++; throw new QuizPauseException("offline quiz reached"); }, IgnoreLog, IgnoreCourse);
                 try { await quiz.TryRun(blank, CancellationToken.None).ConfigureAwait(false); }

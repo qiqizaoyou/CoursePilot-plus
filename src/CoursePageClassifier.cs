@@ -20,6 +20,8 @@ namespace CoursePilot
     {
         internal CoursePageKind Kind;
         internal bool QuizClues;
+        internal bool QuizConfirmed, QuizOutsideVideo;
+        internal readonly List<string> QuizEvidence = new List<string>();
         internal string Reason;
         internal bool HeaderTitle, BodyTitle, VideoTitle;
         internal int Yellow, Total, Questions;
@@ -28,8 +30,10 @@ namespace CoursePilot
         internal List<CourseTaskTarget> Tasks = new List<CourseTaskTarget>();
         internal string Describe()
         {
-            return String.Format("标题区{0}、正文{1}、视频区{2}；黄点{3}，题量{4}，题型标记{5} → {6}",
-                HeaderTitle ? "命中" : "未命中", BodyTitle ? "命中" : "未命中", VideoTitle ? "命中" : "未命中", Yellow, Total, Questions, Reason);
+            return String.Format("标题区{0}、正文{1}、视频区{2}；黄点{3}，题量{4}，明确题型标记{5}；测验组合证据{7}，视频外证据{8} → {6}",
+                HeaderTitle ? "命中" : "未命中", BodyTitle ? "命中" : "未命中", VideoTitle ? "命中" : "未命中", Yellow, Total, Questions, Reason,
+                QuizConfirmed ? "充分" : "不足", QuizOutsideVideo ? "有" : "无") +
+                (QuizEvidence.Count == 0 ? "" : "\r\n" + String.Join("\r\n", QuizEvidence));
         }
     }
 
@@ -48,35 +52,34 @@ namespace CoursePilot
             {
                 QuizTextPage headerText = await ocr.Read(header, cancellation).ConfigureAwait(false);
                 QuizTextPage bodyText = await ocr.Read(body, cancellation).ConfigureAwait(false);
+                QuizTextPage videoText = await ocr.Read(video, cancellation).ConfigureAwait(false);
                 List<Dot> taskDots = Recognition.FindTaskDots(task);
                 int headerYellow = QuizVision.YellowCount(header);
                 bool green = taskDots.Any(d => d.Color == DotColor.Green) || (headerYellow == 0 && QuizVision.GreenCount(header) > 0);
                 CoursePageEvidence evidence = new CoursePageEvidence {
-                    Kind = CoursePageKind.Unknown, HeaderTitle = QuizVision.HasQuizTitle(headerText), BodyTitle = QuizVision.HasQuizTitle(bodyText),
-                    Yellow = Math.Max(headerYellow, taskDots.Count(d => d.Color == DotColor.Yellow)), Total = QuizVision.Total(bodyText),
-                    Questions = QuestionCount(bodyText, body.Width)
+                    Kind = CoursePageKind.Unknown, HeaderTitle = QuizVision.HasQuizTitle(headerText), BodyTitle = QuizVision.HasQuizTitle(bodyText), VideoTitle = QuizVision.HasQuizTitle(videoText),
+                    Yellow = Math.Max(headerYellow, taskDots.Count(d => d.Color == DotColor.Yellow)), Total = Math.Max(QuizVision.Total(bodyText), QuizVision.Total(videoText)),
+                    Questions = Math.Max(QuestionCount(bodyText, body.Width), QuestionCount(videoText, video.Width))
                 };
                 evidence.BodyText = bodyText; evidence.Content = regions.QuizBody.ToPixels(screen.Size);
-                bool bodyQuestions = QuestionLayout(body, bodyText);
-                evidence.QuizClues = evidence.HeaderTitle || evidence.BodyTitle || bodyQuestions || evidence.Questions > 0;
-                if (evidence.QuizClues && evidence.Yellow > 0) { evidence.Kind = CoursePageKind.Quiz; evidence.Reason = "章节测验"; return evidence; }
-                if (evidence.QuizClues && green) { evidence.Kind = CoursePageKind.CompletedTask; evidence.Reason = "任务点已绿"; return evidence; }
-
-                // The calibrated video crop can contain a quiz card when the title crop has moved out of view.
-                QuizTextPage videoText = await ocr.Read(video, cancellation).ConfigureAwait(false);
-                evidence.VideoTitle = QuizVision.HasQuizTitle(videoText);
-                bool videoQuestions = QuestionLayout(video, videoText);
-                evidence.Total = Math.Max(evidence.Total, QuizVision.Total(videoText));
-                evidence.Questions = Math.Max(evidence.Questions, QuestionCount(videoText, video.Width));
-                evidence.QuizClues |= evidence.VideoTitle || videoQuestions || evidence.Questions > 0;
+                Rectangle videoBounds = regions.Video.ToPixels(screen.Size);
+                DescribeSignals(evidence, "标题区", headerText, regions.QuizHeader.ToPixels(screen.Size), videoBounds);
+                DescribeSignals(evidence, "正文", bodyText, evidence.Content, videoBounds);
+                DescribeSignals(evidence, "视频区", videoText, videoBounds, videoBounds);
+                bool layout = QuestionLayout(body, bodyText) || QuestionLayout(video, videoText);
+                bool title = evidence.HeaderTitle || evidence.BodyTitle || evidence.VideoTitle;
+                evidence.QuizClues = title || layout || evidence.Questions > 0;
+                evidence.QuizConfirmed = (title && (evidence.Total > 0 || evidence.Questions > 0)) || layout;
+                // Preserve task identity even when lesson slides contain quiz-like text.
+                evidence.Tasks = CourseLocator.Find(screen, bodyText, evidence.Content, regions);
                 if (evidence.QuizClues)
                 {
-                    if (evidence.Yellow > 0) { evidence.Kind = CoursePageKind.Quiz; evidence.Reason = "章节测验（正文补查）"; }
+                    if (!evidence.QuizConfirmed) evidence.Reason = "仅有测验线索，组合证据不足，待复查";
+                    else if (evidence.Yellow > 0) { evidence.Kind = CoursePageKind.Quiz; evidence.Reason = "章节测验（组合证据确认）"; }
                     else if (green) { evidence.Kind = CoursePageKind.CompletedTask; evidence.Reason = "测验任务点已绿"; }
                     else evidence.Reason = "疑似测验，待复查任务点";
                     return evidence;
                 }
-                evidence.Tasks = CourseLocator.Find(screen, bodyText, evidence.Content, regions);
                 if (evidence.Tasks.Count > 0)
                 {
                     evidence.Kind = CoursePageKind.Video;
@@ -100,11 +103,35 @@ namespace CoursePilot
             }
         }
         private static int QuestionCount(QuizTextPage text, int width)
-        { return text.Lines.Count(l => QuizVision.Marker(l, 0, width) != null); }
+        { return text.Lines.Count(l => PageQuestion(l, width)); }
+
+        // Page identity is stricter than OCR recovery inside an already confirmed quiz.
+        // In particular, "2.计算实参" is prose, whereas "2【计算】" is an explicit tag.
+        internal static bool PageQuestion(QuizText line, int width)
+        {
+            if (line.Bounds.Left > width * .26) return false;
+            return Regex.IsMatch(QuizVision.Normalize(line.Text), @"^\d{1,3}[.、．]?(?:[【\[（(〔〖](?:单选题?|多选题?|判断题?|填空题?|简答题?|论述题?|计算题?)[】\]）)〕〗]|[【\[（(〔〖]?(?:单选题|多选题|判断题|填空题|简答题|论述题|计算题))");
+        }
+        private static void DescribeSignals(CoursePageEvidence evidence, string area, QuizTextPage text, Rectangle bounds, Rectangle video)
+        {
+            foreach (QuizText line in text.Lines)
+            {
+                string value = QuizVision.Normalize(line.Text);
+                bool title = value.Contains("章节测验") || value.Contains("章节测试");
+                bool question = PageQuestion(line, bounds.Width);
+                bool total = Regex.IsMatch(value, @"^(?:总)?题[量数][:：]?\d|^共\d+题");
+                bool loose = QuizVision.Marker(line, 0, bounds.Width) != null;
+                if (!title && !question && !total && !loose) continue;
+                Rectangle location = line.Bounds; location.Offset(bounds.Location);
+                bool outside = !video.Contains(new Point(location.Left + location.Width / 2, location.Top + location.Height / 2));
+                if ((title || question || total) && outside) evidence.QuizOutsideVideo = true;
+                evidence.QuizEvidence.Add(area + " " + location + "「" + line.Text + "」：" +
+                    (title ? "测验标题" : question ? "明确题型" : total ? "题量" : "普通编号句，不作为页面题型") + (outside ? "，视频区域外" : "，视频区域内"));
+            }
+        }
         private static bool QuestionLayout(Bitmap image, QuizTextPage text)
         {
-            if (QuizVision.Total(text) < 1) return false;
-            bool type = text.Lines.Any(l => Regex.IsMatch(QuizVision.Normalize(l.Text), "单选题|多选题|判断题|填空题"));
+            bool type = QuestionCount(text, image.Width) > 0 || (QuizVision.Total(text) > 0 && text.Lines.Any(l => Regex.IsMatch(QuizVision.Normalize(l.Text), "单选题|多选题|判断题|填空题")));
             return type && (QuizVision.Choices(image, text).Select(c => c.Label).Distinct().Count() >= 2 || FillVision.Find(image, text).Count > 0);
         }
         private static bool HasPlayerControls(QuizTextPage text, int height)

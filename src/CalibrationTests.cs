@@ -25,6 +25,7 @@ namespace CoursePilot
                 TestCalibrationProfiles(output);
                 TestCalibrationProbe(output).GetAwaiter().GetResult();
                 TestCalibrationUi(output);
+                TestCalibrationGuide(output);
                 TestCalibrationGuards();
                 results.Add("All " + results.Count + " compatibility checks passed. No live desktop input or model requests.");
                 File.WriteAllLines(Path.Combine(output, "test-results.txt"), results);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -86,10 +86,12 @@ namespace CoursePilot
         }
         internal CalibrationProfile Clone()
         { return new CalibrationProfile { Version = Version, Machine = Machine, Environment = Environment, Confirmed = (string[])Confirmed.Clone() }; }
+        internal bool IsConfirmed(Regions regions, int group)
+        { return Machine == LocalMachine() && Environment != null && Confirmed[group] == CalibrationAreas.Key(regions, group); }
         internal bool Ready(Regions regions, CalibrationEnvironment environment)
         { return Machine == LocalMachine() && Environment != null && Environment.Matches(environment) && Enumerable.Range(0, 3).All(i => Confirmed[i] == CalibrationAreas.Key(regions, i)); }
         internal string Progress(Regions regions)
-        { return String.Join(" · ", Enumerable.Range(0, 3).Select(i => CalibrationAreas.GroupName(i) + (Confirmed[i] == CalibrationAreas.Key(regions, i) ? "已确认" : "待框选"))); }
+        { return String.Join(" · ", Enumerable.Range(0, 3).Select(i => CalibrationAreas.GroupName(i) + (IsConfirmed(regions, i) ? "已确认" : "待框选"))); }
     }
 
     internal static class CalibrationAreas
@@ -178,7 +180,7 @@ namespace CoursePilot
             Directory.CreateDirectory(directory);
             Region[] areas = CalibrationAreas.Get(regions, group);
             for (int i = 0; i < areas.Length; i++) using (Bitmap crop = Recognition.Crop(screen, areas[i])) crop.Save(Path.Combine(directory, "region-" + (i + 1) + ".png"), ImageFormat.Png);
-            File.WriteAllText(Path.Combine(directory, "report.json"), new JavaScriptSerializer().Serialize(new { version = "0.6.15", environment, report,
+            File.WriteAllText(Path.Combine(directory, "report.json"), new JavaScriptSerializer().Serialize(new { version = "0.6.16", environment, report,
                 regions = areas, names = CalibrationAreas.Names(group) }), Encoding.UTF8);
             File.WriteAllText(Path.Combine(directory, "说明.txt"), "此包由只识别模式生成，未点击课程、滚动或调用模型。仅包含本次选定区域截图及识别诊断，不包含 API Key。\n" + report.Summary(), Encoding.UTF8);
             return directory;

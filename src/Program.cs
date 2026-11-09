@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
@@ -23,8 +23,8 @@ using FontFamily = System.Windows.Media.FontFamily;
 
 [assembly: AssemblyTitle("随课 · CoursePilot")]
 [assembly: AssemblyDescription("课程视频监测与 DeepSeek 章节测验解答复核工具")]
-[assembly: AssemblyVersion("0.6.15.0")]
-[assembly: AssemblyFileVersion("0.6.15.0")]
+[assembly: AssemblyVersion("0.6.16.0")]
+[assembly: AssemblyFileVersion("0.6.16.0")]
 
 namespace CoursePilot
 {
@@ -105,7 +105,7 @@ namespace CoursePilot
             UpdateDeepSeekHint();
             picker.SelectionChanged += delegate { regions = new Regions(); ResetCalibration(); ResetConfirmation(); UpdateRegionHint(); CalibrationHint(); Log("已切换目标屏幕，请重新手动框选并确认全部区域。"); };
             Control<Button>("ConfirmButton").Click += async delegate { await Preflight(false); };
-            Control<Button>("GuideButton").Click += async delegate { await SetupWizard(); };
+            new CalibrationGuide(Window, RunCalibration, group => calibration.IsConfirmed(regions, group), () => running, Log);
             Control<Button>("DiagnosticButton").Click += async delegate { await Preflight(true); };
             Control<Button>("StartButton").Click += async delegate { await Start(); };
             Control<Button>("StopButton").Click += delegate { Stop(); };
@@ -115,9 +115,6 @@ namespace CoursePilot
                 Control<Button>("ManualContinueButton").IsEnabled = false;
                 manualGate.Confirm();
             };
-            Control<Button>("CalibrateButton").Click += async delegate { await Calibrate(false); };
-            Control<Button>("CalibrateCourseButton").Click += async delegate { await Calibrate(true); };
-            Control<Button>("CalibrateQuizButton").Click += async delegate { await Calibrate(false, true); };
             Control<Button>("DeepSeekSettingsButton").Click += delegate
             {
                 if (running) return;
@@ -145,7 +142,7 @@ namespace CoursePilot
             };
             UpdateRegionHint();
             CalibrationHint();
-            Log("首次使用请点击“手动引导”，依次框选并确认目录、课程页、测验页的全部 7 个区域，再返回目录预检。");
+            Log("先选择页面并点击“框选当前页”，或点击“继续未完成引导”补齐目录、课程、测验的 7 个区域，再返回目录预检。");
         }
 
         private IntPtr WindowMessage(IntPtr hwnd, int msg, IntPtr wparam, IntPtr lparam, ref bool handled)
@@ -195,6 +192,7 @@ namespace CoursePilot
             Control<Button>("GlmSettingsButton").IsEnabled = enabled;
             Control<Button>("DefaultRegionsButton").IsEnabled = enabled;
             Control<Button>("GuideButton").IsEnabled = enabled;
+            Control<Button>("ContinueGuideButton").IsEnabled = enabled;
             Control<Button>("DiagnosticButton").IsEnabled = enabled;
             Control<ComboBox>("DiagnosticKind").IsEnabled = enabled;
             Control<Button>("ConfirmButton").IsEnabled = false;
@@ -446,11 +444,6 @@ namespace CoursePilot
             if (!placed) { floating.Hide(); Log("识别区域附近无浮窗空间，运行期间可按 F8 随时停止。"); }
         }
 
-        private async Task Calibrate(bool coursePage, bool quizPage = false)
-        {
-            await RunCalibration(quizPage ? 2 : coursePage ? 1 : 0);
-        }
-
         private void UpdateRegionHint()
         {
             if (Control<ComboBox>("ScreenPicker").SelectedIndex < 0) return;
@@ -543,7 +536,7 @@ namespace CoursePilot
             prompts = quizPage ? new string[] { "测验标题与任务黄点（红框对应区域）", "测验内容视口（含题卡，避开右侧目录、任务栏与桌宠）" }
                 : coursePage ? new string[] { "区域1：仅任务圆点（保留少量白边）", "区域2：完整视频画面", "区域4：「返回课程」中文文字" }
                 : new string[] { "区域1：完整章节目录", "区域2：顶部整体状态圆点" };
-            Title = "随课 · 校准识别区域";
+            Title = "随课 · 框选" + CalibrationAreas.GroupName(quizPage ? 2 : coursePage ? 1 : 0) + "页区域";
             WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize; ShowInTaskbar = false; Topmost = true;
             Background = Brushes.Black; Cursor = Cursors.Cross; WindowStartupLocation = WindowStartupLocation.Manual;
             Grid grid = new Grid();

@@ -74,12 +74,6 @@ namespace CoursePilot
             try { calibration.Save(CalibrationPath); }
             catch (Exception e) { Log("校准重置未能保存：" + e.Message); }
         }
-        private async Task SetupWizard()
-        {
-            if (running) return;
-            for (int group = 0; group < 3; group++) if (!await RunCalibration(group)) return;
-            Log("7 个区域已手动确认。请返回目录页，再点击“确认并预检”。");
-        }
         private async Task<bool> RunCalibration(int group)
         {
             if (running) return false;
@@ -95,26 +89,50 @@ namespace CoursePilot
                     RegionSelector selector = new RegionSelector(shot, screen.Bounds, regions, group == 1, group == 2);
                     if (selector.ShowDialog() != true) return false;
                     CalibrationReport report = await CalibrationProbe.Inspect(shot, selector.Result, group, new WindowsQuizOcr(), CancellationToken.None);
+                    ShowCalibrationPreview(Window, shot, selector.Result, group, "待逐项确认", report.Summary());
                     string diagnosticPath = CalibrationProbe.Export(dataDirectory, shot, selector.Result, group, environment, report);
                     Log("本次手动画框诊断：" + diagnosticPath);
                     CalibrationReview review = new CalibrationReview(shot, selector.Result, group, report);
-                    if (review.ShowDialog() != true) { Log("本次框选未确认保存；" + report.Summary()); return false; }
+                    if (review.ShowDialog() != true)
+                    {
+                        ShowCalibrationPreview(Window, shot, selector.Result, group, "本次未保存", "此前已保存的区域保持不变。");
+                        Log("本次框选未确认保存；" + report.Summary()); return false;
+                    }
                     environment.Guard();
                     Regions prior = regions; regions = selector.Result;
                     if (!SaveRegions()) { regions = prior; return false; }
                     CalibrationProfile updated = calibration.Clone();
                     updated.Accept(group, regions, environment); updated.Save(CalibrationPath); calibration = updated;
+                    ShowCalibrationPreview(Window, shot, regions, group, "已确认保存", report.Summary());
                     Log(CalibrationAreas.GroupName(group) + "区域已由用户逐项确认保存。"); return true;
                 }
             }
             catch (Exception e) { Log("手动校准未完成：" + e.Message); return false; }
-            finally { ToggleControls(true); Control<Button>("StopButton").IsEnabled = false; ResetConfirmation(); UpdateRegionHint(); CalibrationHint(); Window.WindowState = WindowState.Normal; Window.Activate(); }
+            finally { ToggleControls(true); Control<Button>("StopButton").IsEnabled = false; ResetConfirmation(); CalibrationHint(); Window.WindowState = WindowState.Normal; Window.Activate(); }
+        }
+        internal static void ShowCalibrationPreview(Window window, Bitmap shot, Regions regions, int group, string stage, string summary)
+        {
+            Region[] areas = CalibrationAreas.Get(regions, group);
+            using (Bitmap top = Recognition.Crop(shot, areas[group == 0 ? 1 : 0]))
+            using (Bitmap body = Recognition.Crop(shot, areas[group == 0 ? 0 : 1]))
+            {
+                ((System.Windows.Controls.Image)window.FindName("StatusPreview")).Source = Program.ImageSource(top);
+                ((System.Windows.Controls.Image)window.FindName("ListPreview")).Source = Program.ImageSource(body);
+            }
+            ((StackPanel)window.FindName("StatusPlaceholder")).Visibility = Visibility.Collapsed;
+            ((StackPanel)window.FindName("ListPlaceholder")).Visibility = Visibility.Collapsed;
+            ((TextBlock)window.FindName("ObservationTitle")).Text = CalibrationAreas.GroupName(group) + "页区域预览";
+            ((TextBlock)window.FindName("ContentRegionTitle")).Text = group == 1 ? "完整视频区域" : CalibrationAreas.Names(group)[group == 0 ? 0 : 1];
+            ((TextBlock)window.FindName("DotResult")).Text = stage;
+            ((TextBlock)window.FindName("CaptureTime")).Text = "采集于 " + DateTime.Now.ToString("HH:mm:ss");
+            ((TextBlock)window.FindName("RegionHint")).Text = stage + " · " + summary;
         }
         private async Task Preflight(bool diagnostic)
         {
             if (running) return;
-            int group = diagnostic ? Control<ComboBox>("DiagnosticKind").SelectedIndex : 0;
-            if (group < 0) group = 0;
+            int group;
+            try { group = diagnostic ? CalibrationGuide.SelectedGroup(Window) : 0; }
+            catch (Exception e) { Log(e.Message); return; }
             ToggleControls(false); Control<Button>("StopButton").IsEnabled = false; bool passed = false;
             try
             {
@@ -128,7 +146,8 @@ namespace CoursePilot
                     if (!diagnostic) report.Check(calibration.Ready(regions, environment), "7 个区域已手动确认，且当前屏幕、缩放及窗口布局与校准时一致。");
                     string path = CalibrationProbe.Export(dataDirectory, shot, regions, group, environment, report);
                     Log(report.Summary()); Log("本机诊断已保存到：" + path);
-                    if (group == 0) using (Bitmap status = Recognition.Crop(shot, regions.Status)) using (Bitmap list = Recognition.Crop(shot, regions.List))
+                    if (diagnostic) ShowCalibrationPreview(Window, shot, regions, group, "只识别诊断", report.Summary());
+                    else if (group == 0) using (Bitmap status = Recognition.Crop(shot, regions.Status)) using (Bitmap list = Recognition.Crop(shot, regions.List))
                     { var dots = Recognition.FindDots(list, true); Preview(status, list, dots.Count(d => d.Color == DotColor.Green), dots.Count(d => d.Color == DotColor.Yellow)); }
                     passed = report.Passed && !diagnostic;
                     if (diagnostic) Log("只识别结束；可将诊断包交给本机 Codex，按 COMPATIBILITY.md 排查。");

@@ -4,7 +4,7 @@ $projectRoot = $PSScriptRoot
 $framework = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $compiler = Join-Path $framework 'csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) { throw '未找到 Windows .NET Framework 4.x 编译器。' }
-$output = Join-Path $projectRoot 'dist\v0.6.15'
+$output = Join-Path $projectRoot 'dist\v0.6.16'
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 $references = @('System.dll','System.Core.dll','System.Drawing.dll','System.Windows.Forms.dll','System.Xaml.dll','System.Security.dll','System.Net.Http.dll','System.Web.Extensions.dll','System.Runtime.WindowsRuntime.dll','System.Runtime.InteropServices.WindowsRuntime.dll') | ForEach-Object { '/reference:' + (Join-Path $framework $_) }
 $metadata = Join-Path $env:WINDIR 'System32\WinMetadata'

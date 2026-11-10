@@ -1,0 +1,48 @@
+name: Publish v0.6.17
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - releases/v0.6.17/**
+      - .github/workflows/publish-v0.6.17.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-v0.6.17
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify prepared Windows package
+        working-directory: releases/v0.6.17
+        run: sha256sum --check SHA256SUMS.txt
+      - name: Publish the verified package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v0.6.17 >/dev/null 2>&1; then
+            echo 'v0.6.17 already exists; leaving the existing release unchanged.'
+            exit 0
+          fi
+          gh release create v0.6.17 \
+            releases/v0.6.17/CoursePilot-v0.6.17-win-x64.zip \
+            releases/v0.6.17/SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title '随课 CoursePilot-plus v0.6.17' \
+            --notes-file releases/v0.6.17/NOTES.md \
+            --latest

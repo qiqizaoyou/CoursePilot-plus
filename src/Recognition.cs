@@ -58,7 +58,30 @@ namespace CoursePilot
             return FindDotsCore(input, false, true);
         }
 
-        private static List<Dot> FindDotsCore(Bitmap input, bool chapterList, bool taskPoint)
+        internal static List<Dot> TaskCandidates(Bitmap input) { return FindDotsCore(input, false, true, false); }
+        internal static void MarkTaskCandidates(Bitmap image)
+        {
+            List<Dot> accepted = FindTaskDots(image), candidates = TaskCandidates(image);
+            using (Graphics g = Graphics.FromImage(image))
+                foreach (Dot dot in candidates)
+                using (Pen pen = new Pen(accepted.Any(d => d.Bounds == dot.Bounds) ? Color.LimeGreen : Color.Red, 2)) g.DrawRectangle(pen, dot.Bounds);
+        }
+        private static bool RoundTask(int[] queue, int count, int stride, int left, int top, int width, int height)
+        {
+            bool[] ink = new bool[width * height];
+            for (int i = 0; i < count; i++) ink[(queue[i] / stride - top) * width + queue[i] % stride - left] = true;
+            int ring = 0, filled = 0, outside = 0;
+            for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
+            {
+                double dx = (x + .5 - width / 2.0) / (width / 2.0), dy = (y + .5 - height / 2.0) / (height / 2.0), radius = dx * dx + dy * dy;
+                bool pixel = ink[y * width + x];
+                if (radius >= .30 && radius <= .72) { ring++; if (pixel) filled++; }
+                if (radius > 1.12 && pixel) outside++;
+            }
+            // Inspect the middle ring so a white check mark can remain inside a green circle.
+            return ring > 0 && filled >= ring * .70 && outside <= count * .10;
+        }
+        private static List<Dot> FindDotsCore(Bitmap input, bool chapterList, bool taskPoint, bool roundTask = true)
         {
             double scale = Math.Min(1.0, 1920.0 / input.Width);
             int width = Math.Max(1, (int)Math.Round(input.Width * scale));
@@ -111,6 +134,7 @@ namespace CoursePilot
                         // Reject cropped circles, lettering, broad blocks, and rectangular icons.
                         if (w < minSize || h < minSize || w > maxSize || h > maxSize || aspect < 0.72 || aspect > 1.38 || fill < 0.38 || fill > 0.88) continue;
                         if (left <= 0 || top <= 0 || right >= width - 1 || bottom >= height - 1) continue;
+                        if (taskPoint && roundTask && !RoundTask(queue, tail, width, left, top, w, h)) continue;
                         result.Add(new Dot { Color = color == 1 ? DotColor.Yellow : DotColor.Green,
                             Bounds = new Rectangle((int)Math.Round(left / scale), (int)Math.Round(top / scale), (int)Math.Round(w / scale), (int)Math.Round(h / scale)) });
                     }

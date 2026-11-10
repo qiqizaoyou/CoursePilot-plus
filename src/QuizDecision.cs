@@ -92,8 +92,9 @@ namespace CoursePilot
         public string brief_reason { get; set; }
         internal void Validate(QuizQuestion q, int count)
         {
-            if (id != q.Id || pairs == null || brief_reason == null || pairs.Length != count * (count - 1) / 2)
-                throw new FormatException("同义判定缺少候选对");
+            if (id != q.Id) throw new FormatException("同义判定 id 缺失或与本题不匹配");
+            if (brief_reason == null) throw new FormatException("同义判定缺少 brief_reason");
+            if (pairs == null || pairs.Length != count * (count - 1) / 2) throw new FormatException("同义判定 pairs 数量不完整");
             HashSet<string> seen = new HashSet<string>();
             foreach (SamePair p in pairs)
                 if (p == null || !p.a.HasValue || !p.b.HasValue || p.a < 0 || p.b >= count || p.a >= p.b ||
@@ -193,7 +194,7 @@ namespace CoursePilot
         internal async Task<DecisionAnswer> Decide(QuizQuestion q, Bitmap image, CancellationToken token)
         {
             token.ThrowIfCancellationRequested(); history.Clear();
-            bool arbitration = false; int collected = 0, requested = 0;
+            bool arbitration = false, semantic = false; int collected = 0, requested = 0;
             try
             {
                 Show("第 " + q.Number + " 题 · 1/4 DeepSeek 独立初答", token);
@@ -211,7 +212,9 @@ namespace CoursePilot
                 List<DecisionAnswer> votes = new List<DecisionAnswer> { first, second };
                 if (r1.Passed && r2.Passed && first.needs_review == false && second.needs_review == false)
                 {
+                    semantic = q.Type == "fill";
                     var initialGroups = await Group(q, image, votes, token).ConfigureAwait(false);
+                    semantic = false;
                     if (initialGroups.Count == 1)
                     {
                         Show("两次审批通过，两份答案一致（含已确认的同义表达）。采用：" + first.Display(), token);
@@ -259,7 +262,7 @@ namespace CoursePilot
             catch (QuizPauseException e)
             {
                 string reason = (arbitration && collected < 12 ? "追加采集 " + requested + "/10；有效票 " + collected + "/12；剩余 " + (10 - requested) + " 次未执行；本次未计票：" : "") + e.Message;
-                if (arbitration) { Show("仲裁未通过，等待人工填答：" + reason, token); throw new QuizManualException(reason); }
+                if (arbitration || semantic) { Show((semantic ? "同义确认未完成" : "仲裁未通过") + "，等待人工填答：" + reason, token); throw new QuizManualException(reason); }
                 Show("本次已停止：" + reason, token); throw new QuizPauseException(reason);
             }
         }

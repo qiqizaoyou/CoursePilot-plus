@@ -29,6 +29,7 @@ namespace CoursePilot
             {
                 using (Bitmap crop = Recognition.Crop(shot, areas[i]))
                 {
+                    if (group == 1 && i == 0) Recognition.MarkTaskCandidates(crop);
                     if (group == 1 && i == 1)
                     using (Graphics g = Graphics.FromImage(crop))
                     using (Drawing.Pen pen = new Drawing.Pen(Drawing.Color.Red, 3))
@@ -81,9 +82,10 @@ namespace CoursePilot
             ToggleControls(false); Control<Button>("StopButton").IsEnabled = false;
             try
             {
-                Window.WindowState = WindowState.Minimized; await Task.Delay(3000);
+                Window.WindowState = WindowState.Minimized;
                 Forms.Screen screen = Forms.Screen.AllScreens.First(s => s.DeviceName == screens[Control<ComboBox>("ScreenPicker").SelectedIndex].DeviceName);
-                CalibrationEnvironment environment = CalibrationEnvironment.Capture(screen, Native.GetForegroundWindow());
+                CalibrationEnvironment environment = await ForegroundReady.Wait(() => CalibrationEnvironment.CaptureForeground(screen), null, false, Log, CancellationToken.None);
+                if (Native.GetForegroundWindow() != environment.Handle) throw new QuizPauseException("截图前前台窗口已切换，请重试。");
                 using (Bitmap shot = new WindowsDesktop(screen.Bounds).Capture())
                 {
                     RegionSelector selector = new RegionSelector(shot, screen.Bounds, regions, group == 1, group == 2);
@@ -116,6 +118,7 @@ namespace CoursePilot
             using (Bitmap top = Recognition.Crop(shot, areas[group == 0 ? 1 : 0]))
             using (Bitmap body = Recognition.Crop(shot, areas[group == 0 ? 0 : 1]))
             {
+                if (group == 1) Recognition.MarkTaskCandidates(top);
                 ((System.Windows.Controls.Image)window.FindName("StatusPreview")).Source = Program.ImageSource(top);
                 ((System.Windows.Controls.Image)window.FindName("ListPreview")).Source = Program.ImageSource(body);
             }
@@ -136,10 +139,11 @@ namespace CoursePilot
             ToggleControls(false); Control<Button>("StopButton").IsEnabled = false; bool passed = false;
             try
             {
-                Log("3 秒后只截图识别，请切换到" + CalibrationAreas.GroupName(group) + "页；此步骤不会点击、滚动或答题。");
-                Window.WindowState = WindowState.Minimized; await Task.Delay(3000);
+                Log("请切换到" + CalibrationAreas.GroupName(group) + "页；3 秒后检查前台，最多等待 15 秒稳定确认。此步骤不会点击、滚动或答题。");
+                Window.WindowState = WindowState.Minimized;
                 Forms.Screen screen = Forms.Screen.AllScreens.First(s => s.DeviceName == screens[Control<ComboBox>("ScreenPicker").SelectedIndex].DeviceName);
-                CalibrationEnvironment environment = CalibrationEnvironment.Capture(screen, Native.GetForegroundWindow());
+                CalibrationEnvironment environment = await ForegroundReady.Wait(() => CalibrationEnvironment.CaptureForeground(screen), diagnostic ? null : calibration.Environment, !diagnostic, Log, CancellationToken.None);
+                if (Native.GetForegroundWindow() != environment.Handle) throw new QuizPauseException("截图前前台窗口已切换，请重试。");
                 using (Bitmap shot = new WindowsDesktop(screen.Bounds).Capture())
                 {
                     CalibrationReport report = await CalibrationProbe.Inspect(shot, regions, group, new WindowsQuizOcr(), CancellationToken.None);

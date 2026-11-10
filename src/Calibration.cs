@@ -25,6 +25,19 @@ namespace CoursePilot
         [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint process);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder value, int length);
+        internal static CalibrationEnvironment CaptureForeground(Forms.Screen screen)
+        {
+            IntPtr handle = Native.GetForegroundWindow();
+            try { return Capture(screen, handle); }
+            catch (Exception e)
+            {
+                uint pid; GetWindowThreadProcessId(handle, out pid);
+                StringBuilder name = new StringBuilder(256); GetClassName(handle, name, name.Capacity);
+                string process = "不可用";
+                try { using (Process p = Process.GetProcessById((int)pid)) process = p.ProcessName; } catch { }
+                throw new QuizPauseException("实际前台 " + process + "/" + name + "（窗口 " + handle.ToInt64() + "）：" + e.Message);
+            }
+        }
         internal static CalibrationEnvironment Capture(Forms.Screen screen, IntPtr hwnd)
         {
             uint process; GetWindowThreadProcessId(hwnd, out process);
@@ -152,12 +165,13 @@ namespace CoursePilot
                 using (Bitmap back = Recognition.Crop(screen, regions.Back))
                 {
                     List<Dot> dots = Recognition.FindTaskDots(task);
-                    report.Check(dots.Count == 1, "任务区域应包含一个完整圆点；框太宽或裁到圆边会影响识别。");
+                    List<Dot> candidates = Recognition.TaskCandidates(task);
+                    report.Check(dots.Count == 1, "任务区域有效圆点 " + dots.Count + " 个，颜色形状候选 " + candidates.Count + " 个；须唯一完整圆点，文字候选会排除。");
                     Rectangle video = regions.Video.ToPixels(screen.Size);
                     report.Check(video.Width >= 100 && video.Height >= 60, "视频区域尺寸有效；请人工核对预览中的中心十字位于视频内。");
                     QuizTextPage text = await ocr.Read(back, token).ConfigureAwait(false);
                     report.Check(QuizVision.Normalize(String.Join("", text.Lines.Select(l => l.Text))).Contains("返回课程"), "返回区域能读到“返回课程”。");
-                    foreach (Dot dot in dots) report.Points.Add(dot.Color + " " + dot.Bounds);
+                    foreach (Dot dot in candidates) report.Points.Add(dot.Color + " " + dot.Bounds + (dots.Any(d => d.Bounds == dot.Bounds) ? "（有效圆点）" : "（排除：轮廓不符合圆点）"));
                 }
                 else
                 using (Bitmap header = Recognition.Crop(screen, regions.QuizHeader))
@@ -180,7 +194,9 @@ namespace CoursePilot
             Directory.CreateDirectory(directory);
             Region[] areas = CalibrationAreas.Get(regions, group);
             for (int i = 0; i < areas.Length; i++) using (Bitmap crop = Recognition.Crop(screen, areas[i])) crop.Save(Path.Combine(directory, "region-" + (i + 1) + ".png"), ImageFormat.Png);
-            File.WriteAllText(Path.Combine(directory, "report.json"), new JavaScriptSerializer().Serialize(new { version = "0.6.16", environment, report,
+            if (group == 1) using (Bitmap crop = Recognition.Crop(screen, areas[0]))
+            { Recognition.MarkTaskCandidates(crop); crop.Save(Path.Combine(directory, "task-candidates.png"), ImageFormat.Png); }
+            File.WriteAllText(Path.Combine(directory, "report.json"), new JavaScriptSerializer().Serialize(new { version = "0.6.17", environment, report,
                 regions = areas, names = CalibrationAreas.Names(group) }), Encoding.UTF8);
             File.WriteAllText(Path.Combine(directory, "说明.txt"), "此包由只识别模式生成，未点击课程、滚动或调用模型。仅包含本次选定区域截图及识别诊断，不包含 API Key。\n" + report.Summary(), Encoding.UTF8);
             return directory;

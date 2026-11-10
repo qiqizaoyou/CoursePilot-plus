@@ -23,8 +23,8 @@ using FontFamily = System.Windows.Media.FontFamily;
 
 [assembly: AssemblyTitle("随课 · CoursePilot")]
 [assembly: AssemblyDescription("课程视频监测与 DeepSeek 章节测验解答复核工具")]
-[assembly: AssemblyVersion("0.6.17.0")]
-[assembly: AssemblyFileVersion("0.6.17.0")]
+[assembly: AssemblyVersion("0.6.18.0")]
+[assembly: AssemblyFileVersion("0.6.18.0")]
 
 namespace CoursePilot
 {
@@ -87,8 +87,11 @@ namespace CoursePilot
 
         private T Control<T>(string name) where T : FrameworkElement { return (T)Window.FindName(name); }
 
-        public MainController()
+        public MainController() : this(null, false) { }
+        internal MainController(string offlineDirectory) : this(offlineDirectory, true) { }
+        private MainController(string directory, bool offline)
         {
+            if (directory != null) dataDirectory = directory;
             Window = Program.LoadWindow();
             using (Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("app.ico"))
                 if (stream != null) Window.Icon = BitmapFrame.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
@@ -99,13 +102,21 @@ namespace CoursePilot
             picker.SelectedIndex = Array.FindIndex(screens, s => s.Primary);
             if (picker.SelectedIndex < 0) picker.SelectedIndex = 0;
             LoadRegions();
+            savedRegions = regions.Clone();
             calibration = CalibrationProfile.Load(CalibrationPath);
-            try { deepSeekKey = keyStore.Load(); } catch { Log("本机 DeepSeek 密钥无法解密，请重新设置。"); }
-            try { glmKey = glmStore.Key.Load(); glmModel = glmStore.LoadModel(); } catch { Log("本机 GLM 配置无法读取，请重新设置。"); }
+            layout = LayoutSettings.Load(LayoutPath);
+            int layoutScreen = Array.FindIndex(screens, s => s.DeviceName == layout.Device);
+            if (layoutScreen >= 0) picker.SelectedIndex = layoutScreen;
+            regions = layout.Active(savedRegions, calibration);
+            if (!offline)
+            {
+                try { deepSeekKey = keyStore.Load(); } catch { Log("本机 DeepSeek 密钥无法解密，请重新设置。"); }
+                try { glmKey = glmStore.Key.Load(); glmModel = glmStore.LoadModel(); } catch { Log("本机 GLM 配置无法读取，请重新设置。"); }
+            }
             UpdateDeepSeekHint();
-            picker.SelectionChanged += delegate { regions = new Regions(); ResetCalibration(); ResetConfirmation(); UpdateRegionHint(); CalibrationHint(); Log("已切换目标屏幕，请重新手动框选并确认全部区域。"); };
+            picker.SelectionChanged += delegate { UseDefaults(); Log("已切换目标屏幕，请先预检默认布局。"); };
             Control<Button>("ConfirmButton").Click += async delegate { await Preflight(false); };
-            new CalibrationGuide(Window, RunCalibration, group => calibration.IsConfirmed(regions, group), () => running, Log);
+            new CalibrationGuide(Window, RunCalibration, group => calibration.IsConfirmed(savedRegions, group), () => running, Log);
             Control<Button>("DiagnosticButton").Click += async delegate { await Preflight(true); };
             Control<Button>("StartButton").Click += async delegate { await Start(); };
             Control<Button>("StopButton").Click += delegate { Stop(); };
@@ -127,7 +138,8 @@ namespace CoursePilot
                 GlmSettingsWindow settings = new GlmSettingsWindow(Window, glmKey, glmModel, glmStore);
                 if (settings.ShowDialog() == true) { glmKey = settings.ResultKey; glmModel = settings.ResultModel; UpdateDeepSeekHint(); }
             };
-            Control<Button>("DefaultRegionsButton").Click += delegate { regions = new Regions(); ResetCalibration(); SaveRegions(); UpdateRegionHint(); CalibrationHint(); ResetConfirmation(); Log("已重置参考框；全部区域需重新手动画框确认。"); };
+            Control<Button>("DefaultRegionsButton").Click += delegate { UseDefaults(); };
+            Control<Button>("UseSavedRegionsButton").Click += delegate { UseSavedLayout(); };
             Window.SourceInitialized += delegate
             {
                 source = HwndSource.FromHwnd(new WindowInteropHelper(Window).Handle);
@@ -142,7 +154,7 @@ namespace CoursePilot
             };
             UpdateRegionHint();
             CalibrationHint();
-            Log("先选择页面并点击“框选当前页”，或点击“继续未完成引导”补齐目录、课程、测验的 7 个区域，再返回目录预检。");
+            Log("优先使用默认布局。请打开主课程目录顶部，点击“确认并预检目录页”，再手动切到课程窗口；默认不适用时仅调整对应页。");
         }
 
         private IntPtr WindowMessage(IntPtr hwnd, int msg, IntPtr wparam, IntPtr lparam, ref bool handled)
@@ -176,6 +188,7 @@ namespace CoursePilot
 
         private void ResetConfirmation()
         {
+            layoutApproval.Clear();
             Control<Button>("ConfirmButton").Content = "确认并预检目录页";
             Control<Button>("ConfirmButton").IsEnabled = true;
             Control<Button>("StartButton").IsEnabled = false;
@@ -191,6 +204,7 @@ namespace CoursePilot
             Control<Button>("DeepSeekSettingsButton").IsEnabled = enabled;
             Control<Button>("GlmSettingsButton").IsEnabled = enabled;
             Control<Button>("DefaultRegionsButton").IsEnabled = enabled;
+            Control<Button>("UseSavedRegionsButton").IsEnabled = enabled;
             Control<Button>("GuideButton").IsEnabled = enabled;
             Control<Button>("ContinueGuideButton").IsEnabled = enabled;
             Control<Button>("DiagnosticButton").IsEnabled = enabled;
@@ -216,31 +230,24 @@ namespace CoursePilot
             {
                 Directory.CreateDirectory(dataDirectory);
                 Window.WindowState = WindowState.Minimized;
-                for (int seconds = 3; seconds > 0; seconds--)
-                {
-                    Log(String.Format("{0} 秒后开始截图，请保持课程目录页无遮挡。", seconds));
-                    await Task.Delay(1000, token);
-                }
-                screen = Forms.Screen.FromHandle(Native.GetForegroundWindow());
-                CalibrationEnvironment environment = CalibrationEnvironment.Capture(screen, Native.GetForegroundWindow());
-                if (!calibration.Ready(regions, environment)) throw new QuizPauseException("7 个区域尚未全部确认，或屏幕/缩放/窗口布局已变化。请执行手动引导后重新预检。");
+                Log("3 秒后检查课程目录，请保持目录页无遮挡。");
+                CalibrationEnvironment environment = await ForegroundReady.Wait(() => CalibrationEnvironment.CaptureForeground(screen), layoutApproval.Environment, true, Log, token);
+                if (!layoutApproval.Ready(regions, environment)) throw new QuizPauseException("目录尚未预检通过，或当前屏幕、窗口及布局已变化。请重新预检。");
                 WindowsDesktop desktop = new WindowsDesktop(screen.Bounds, environment.Guard);
-                using (Bitmap shot = desktop.Capture())
-                {
-                    CalibrationReport report = await CalibrationProbe.Inspect(shot, regions, 0, new WindowsQuizOcr(), token);
-                    if (!report.Passed) throw new QuizPauseException("开始前目录复查未通过：" + report.Summary());
-                }
+                await CheckLayout(desktop, environment, 0, false, token);
                 ShowFloating(screen);
                 SessionClock clock = new SessionClock();
                 ChapterQuiz quiz = new ChapterQuiz(desktop, regions, new WindowsQuizOcr(), clock,
                     delegate { return DualQuizModel.Create(deepSeekKey, glmKey, glmModel, Log, PreviewDecision); }, Log, PreviewQuiz,
                     System.IO.Path.Combine(dataDirectory, "fill-readback"), manualWait: WaitForManual, courseIssue: PreviewCourseIssue);
-                CourseSession runner = new CourseSession(desktop, regions, Log, Preview, PreviewCourse, clock, new SessionTiming(), quiz, new DirectoryTaskReader(new WindowsQuizOcr(), Log));
+                CourseSession runner = new CourseSession(desktop, regions, Log, Preview, PreviewCourse, clock, new SessionTiming(), quiz, new DirectoryTaskReader(new WindowsQuizOcr(), Log),
+                    async (count, t) => { await CheckLayout(desktop, environment, -1, count == 0, t).ConfigureAwait(false); });
                 Outcome result = await Task.Run(async delegate { return await runner.Run(token); }, token);
                 string badge = result == Outcome.QuizReady ? "测验待提交" : result == Outcome.BottomReached ? "目录已到底" : result == Outcome.Complete ? "课程已完成" : "需要检查";
                 SetStatus(badge, badge);
             }
             catch (OperationCanceledException) { ShowStoppedState(Window, "已停止", "用户停止", "用户已停止任务。"); Log("任务已停止。"); }
+            catch (LayoutMismatchException exception) { Control<ComboBox>("DiagnosticKind").SelectedIndex = exception.Group; ShowStoppedState(Window, "区域待调整", "仅调整当前页", exception.Message); Log(exception.Message); }
             catch (QuizPauseException exception) { ShowStoppedState(Window, "任务待处理", "请检查提示", exception.Message); Log(exception.Message); }
             catch (Exception exception) { ShowStoppedState(Window, "需要检查", "操作中断", exception.Message); Log("操作中断：" + exception.Message); }
             finally
@@ -452,12 +459,13 @@ namespace CoursePilot
             Control<TextBlock>("RegionHint").Text = String.Format("区域1 {0} × {1}  /  区域2 {2} × {3} px，可手动调整。", list.Width, list.Height, status.Width, status.Height);
         }
 
-        private bool SaveRegions()
+        private bool SaveRegions(Regions selected = null)
         {
             try
             {
                 Directory.CreateDirectory(dataDirectory);
-                Region a = regions.List, b = regions.Status, c = regions.Task, d = regions.Video, e = regions.Back, f = regions.QuizHeader, g = regions.QuizBody;
+                Regions selectedRegions = selected ?? regions;
+                Region a = selectedRegions.List, b = selectedRegions.Status, c = selectedRegions.Task, d = selectedRegions.Video, e = selectedRegions.Back, f = selectedRegions.QuizHeader, g = selectedRegions.QuizBody;
                 string[] lines = { screens[Control<ComboBox>("ScreenPicker").SelectedIndex].DeviceName,
                     String.Join(",", new double[] { a.X, a.Y, a.Width, a.Height, b.X, b.Y, b.Width, b.Height,
                         c.X, c.Y, c.Width, c.Height, d.X, d.Y, d.Width, d.Height, e.X, e.Y, e.Width, e.Height,

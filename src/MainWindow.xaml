@@ -70,7 +70,7 @@
         <StackPanel Grid.Row="2">
           <Border Height="1" Background="#E8E8E8" Margin="0,0,0,17"/>
           <TextBlock Text="本地识别 · 双模型审核" Foreground="#777777" FontSize="11"/>
-          <TextBlock Text="Windows 11  ·  v0.6.17" Foreground="#A0A0A0" FontSize="10" Margin="0,6,0,0"/>
+          <TextBlock Text="Windows 11  ·  v0.6.18" Foreground="#A0A0A0" FontSize="10" Margin="0,6,0,0"/>
         </StackPanel>
       </Grid>
       </ScrollViewer>
@@ -95,17 +95,18 @@
             <Button x:Name="CalibrateButton" Content="目录区域" Height="34" FontSize="12" Margin="0,0,8,0" ToolTip="在目录页校准章节列表与整体状态点"/>
             <Button x:Name="CalibrateCourseButton" Content="课程页区域" Height="34" FontSize="12" Margin="0,0,8,0" ToolTip="请先打开课程页，再校准任务圆点、视频和返回文字"/>
             <Button x:Name="CalibrateQuizButton" Content="测验区域" Height="34" FontSize="12" Margin="0,0,8,0" ToolTip="在章节测验顶部校准标题状态区和整个题目内容视口"/>
-            <Button x:Name="DefaultRegionsButton" Content="重置区域" Height="34" FontSize="12"/>
+            <Button x:Name="DefaultRegionsButton" Content="恢复默认布局" Height="34" FontSize="12"/>
           </StackPanel>
           <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,12,0,0">
             <WrapPanel>
               <TextBlock Text="当前页面" VerticalAlignment="Center" Margin="0,0,8,6" FontSize="12"/>
               <ComboBox x:Name="DiagnosticKind" SelectedIndex="0" Width="100" Margin="0,0,8,6"><ComboBoxItem Content="目录页"/><ComboBoxItem Content="课程页"/><ComboBoxItem Content="测验页"/></ComboBox>
-              <Button x:Name="GuideButton" Content="框选当前页 · 目录页" Style="{StaticResource Primary}" Height="34" FontSize="12" Margin="0,0,8,6"/>
-              <Button x:Name="ContinueGuideButton" Content="继续未完成引导" Height="34" FontSize="12" Margin="0,0,8,6" ToolTip="从首个未确认的页面继续，自动跳过已确认的组"/>
+              <Button x:Name="GuideButton" Content="框选当前页 · 目录页" Height="34" FontSize="12" Margin="0,0,8,6" ToolTip="默认布局不适用时，仅调整当前页面"/>
+              <Button x:Name="ContinueGuideButton" Content="继续手动框选" Height="34" FontSize="12" Margin="0,0,8,6" ToolTip="可选：继续设置自定义区域，默认布局无需完成此引导"/>
               <Button x:Name="DiagnosticButton" Content="只识别 / 导出诊断" Height="34" FontSize="12" Margin="0,0,0,6"/>
+              <Button x:Name="UseSavedRegionsButton" Content="使用已存自定义" Height="34" FontSize="12" Margin="8,0,0,6"/>
             </WrapPanel>
-            <TextBlock x:Name="CalibrationHint" Text="首次使用：7 个区域均需手动框选并确认" FontSize="11" Foreground="#777777" TextWrapping="Wrap"/>
+            <TextBlock x:Name="CalibrationHint" Text="默认布局优先；目录预检通过即可开始，进入课程或测验后再检查对应区域。" FontSize="11" Foreground="#777777" TextWrapping="Wrap"/>
           </StackPanel>
         </Grid>
       </Border>

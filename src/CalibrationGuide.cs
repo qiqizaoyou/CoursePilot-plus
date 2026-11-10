@@ -57,7 +57,7 @@ namespace CoursePilot
                 {
                     int group = continueMissing ? Enumerable.Range(0, 3).FirstOrDefault(i => !confirmed(i)) : page.SelectedIndex;
                     if (continueMissing && Enumerable.Range(0, 3).All(confirmed))
-                    { log("7 个区域已手动确认。请返回目录页，再点击“确认并预检目录页”。"); return; }
+                    { log("三页自定义区域已保存。请返回目录页，再点击“确认并预检目录页”。"); return; }
                     if (group < 0 || group > 2) throw new InvalidOperationException("请先选择目录页、课程页或测验页。");
                     if (++attempts > 6) throw new InvalidOperationException("校准环境反复变化，请固定课程窗口后再继续引导。");
                     page.SelectedIndex = group;

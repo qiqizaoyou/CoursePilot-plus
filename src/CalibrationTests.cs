@@ -30,6 +30,9 @@ namespace CoursePilot
                 TestForegroundRecovery().GetAwaiter().GetResult();
                 TestTaskContours(output);
                 Task.Run(() => TestModelRecovery(output)).GetAwaiter().GetResult();
+                TestDefaultLayoutState(output);
+                Task.Run(() => TestDefaultLayoutChecks(output)).GetAwaiter().GetResult();
+                TestDefaultConfirmationUi(output);
                 results.Add("All " + results.Count + " compatibility checks passed. No live desktop input or model requests.");
                 File.WriteAllLines(Path.Combine(output, "test-results.txt"), results);
                 return 0;

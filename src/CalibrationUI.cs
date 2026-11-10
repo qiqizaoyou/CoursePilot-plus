@@ -66,9 +66,30 @@ namespace CoursePilot
     public sealed partial class MainController
     {
         private CalibrationProfile calibration = new CalibrationProfile();
+        private Regions savedRegions = new Regions();
+        private LayoutSettings layout = new LayoutSettings();
+        private readonly LayoutApproval layoutApproval = new LayoutApproval();
+        internal Func<int, bool, Task<CalibrationEnvironment>> PreflightOverride;
+        private string LayoutPath { get { return Path.Combine(dataDirectory, "layout-mode.json"); } }
+        private void SaveLayout()
+        {
+            layout.Device = screens[Control<ComboBox>("ScreenPicker").SelectedIndex].DeviceName;
+            try { layout.Save(LayoutPath); } catch (Exception e) { Log("布局选择未能保存：" + e.Message); }
+        }
+        private void UseDefaults()
+        {
+            layout.Defaults(); regions = new Regions(); SaveLayout(); ResetConfirmation(); UpdateRegionHint(); CalibrationHint();
+            Log("已使用默认布局；请确认并预检目录页。已保存的自定义区域仍保留，需要时可恢复。");
+        }
+        private void UseSavedLayout()
+        {
+            for (int i = 0; i < 3; i++) layout.Custom[i] = calibration.IsConfirmed(savedRegions, i);
+            regions = layout.Active(savedRegions, calibration); SaveLayout(); ResetConfirmation(); UpdateRegionHint(); CalibrationHint();
+            Log("已载入本机保存的自定义区域，其余页面使用默认布局。请重新预检。");
+        }
         private string CalibrationPath { get { return Path.Combine(dataDirectory, "calibration.json"); } }
         private void CalibrationHint()
-        { Control<TextBlock>("CalibrationHint").Text = calibration.Progress(regions) + "；7 个区域都需手动画框并确认。"; }
+        { Control<TextBlock>("CalibrationHint").Text = layout.Describe() + "。先预检，确认不适用后再调整对应页。"; }
         private void ResetCalibration()
         {
             calibration = new CalibrationProfile();
@@ -101,10 +122,11 @@ namespace CoursePilot
                         Log("本次框选未确认保存；" + report.Summary()); return false;
                     }
                     environment.Guard();
-                    Regions prior = regions; regions = selector.Result;
-                    if (!SaveRegions()) { regions = prior; return false; }
+                    Regions updatedRegions = savedRegions.Clone(); LayoutSettings.CopyGroup(selector.Result, updatedRegions, group);
+                    if (!SaveRegions(updatedRegions)) return false;
                     CalibrationProfile updated = calibration.Clone();
-                    updated.Accept(group, regions, environment); updated.Save(CalibrationPath); calibration = updated;
+                    updated.Accept(group, updatedRegions, environment); updated.Save(CalibrationPath); calibration = updated;
+                    savedRegions = updatedRegions; layout.Custom[group] = true; regions = layout.Active(savedRegions, calibration); SaveLayout();
                     ShowCalibrationPreview(Window, shot, regions, group, "已确认保存", report.Summary());
                     Log(CalibrationAreas.GroupName(group) + "区域已由用户逐项确认保存。"); return true;
                 }
@@ -136,34 +158,63 @@ namespace CoursePilot
             int group;
             try { group = diagnostic ? CalibrationGuide.SelectedGroup(Window) : 0; }
             catch (Exception e) { Log(e.Message); return; }
-            ToggleControls(false); Control<Button>("StopButton").IsEnabled = false; bool passed = false;
+            ToggleControls(false); Control<Button>("StopButton").IsEnabled = false; bool passed = false; CalibrationEnvironment accepted = null;
             try
             {
-                Log("请切换到" + CalibrationAreas.GroupName(group) + "页；3 秒后检查前台，最多等待 15 秒稳定确认。此步骤不会点击、滚动或答题。");
-                Window.WindowState = WindowState.Minimized;
+                Log("窗口保持原状态，请手动切换到" + CalibrationAreas.GroupName(group) + "页；3 秒后检查前台，最多等待 15 秒。不会点击或滚动课程。");
+                if (PreflightOverride != null)
+                { accepted = await PreflightOverride(group, diagnostic); passed = accepted != null && !diagnostic; }
+                else
+                {
                 Forms.Screen screen = Forms.Screen.AllScreens.First(s => s.DeviceName == screens[Control<ComboBox>("ScreenPicker").SelectedIndex].DeviceName);
-                CalibrationEnvironment environment = await ForegroundReady.Wait(() => CalibrationEnvironment.CaptureForeground(screen), diagnostic ? null : calibration.Environment, !diagnostic, Log, CancellationToken.None);
-                if (Native.GetForegroundWindow() != environment.Handle) throw new QuizPauseException("截图前前台窗口已切换，请重试。");
-                using (Bitmap shot = new WindowsDesktop(screen.Bounds).Capture())
+                CalibrationEnvironment environment = await ForegroundReady.Wait(() => CalibrationEnvironment.CaptureForeground(screen), null, false, Log, CancellationToken.None);
+                WindowsDesktop desktop = new WindowsDesktop(screen.Bounds, environment.CheckVisible);
+                if (!diagnostic)
+                {
+                    await CheckLayout(desktop, environment, 0, false, CancellationToken.None);
+                    accepted = environment; passed = true;
+                }
+                using (Bitmap shot = desktop.Capture())
                 {
                     CalibrationReport report = await CalibrationProbe.Inspect(shot, regions, group, new WindowsQuizOcr(), CancellationToken.None);
-                    if (!diagnostic) report.Check(calibration.Ready(regions, environment), "7 个区域已手动确认，且当前屏幕、缩放及窗口布局与校准时一致。");
+                    if (!diagnostic && !report.Passed) throw new QuizPauseException("预检画面发生变化，请保持目录页稳定后重试：" + report.Summary());
                     string path = CalibrationProbe.Export(dataDirectory, shot, regions, group, environment, report);
                     Log(report.Summary()); Log("本机诊断已保存到：" + path);
                     if (diagnostic) ShowCalibrationPreview(Window, shot, regions, group, "只识别诊断", report.Summary());
                     else if (group == 0) using (Bitmap status = Recognition.Crop(shot, regions.Status)) using (Bitmap list = Recognition.Crop(shot, regions.List))
                     { var dots = Recognition.FindDots(list, true); Preview(status, list, dots.Count(d => d.Color == DotColor.Green), dots.Count(d => d.Color == DotColor.Yellow)); }
-                    passed = report.Passed && !diagnostic;
                     if (diagnostic) Log("只识别结束；可将诊断包交给本机 Codex，按 COMPATIBILITY.md 排查。");
                 }
+                }
             }
-            catch (Exception e) { Log("预检未通过：" + e.Message); }
+            catch (LayoutMismatchException e) { passed = false; Control<ComboBox>("DiagnosticKind").SelectedIndex = e.Group; Log("预检未通过：" + e.Message); }
+            catch (Exception e) { passed = false; Log("预检未通过：" + e.Message); }
             finally
             {
                 ToggleControls(true); Control<Button>("StopButton").IsEnabled = false; ResetConfirmation(); CalibrationHint();
-                if (passed) { Control<Button>("ConfirmButton").Content = "手动区域预检通过 ✓"; Control<Button>("StartButton").IsEnabled = true; SetStatus("等待开始", "预检通过"); }
-                Window.WindowState = WindowState.Normal; Window.Activate();
+                if (passed) { layoutApproval.Accept(regions, accepted); Control<Button>("ConfirmButton").Content = "目录预检通过 ✓"; Control<Button>("StartButton").IsEnabled = true; SetStatus("等待开始", "预检通过"); }
             }
+        }
+
+        private Task<LayoutObservation> CheckLayout(IDesktop desktop, CalibrationEnvironment environment, int group, bool returnOnly, CancellationToken token)
+        {
+            return LayoutChecks.Confirm(async t =>
+            {
+                try
+                {
+                    environment.CheckVisible();
+                    using (Bitmap shot = desktop.Capture())
+                    {
+                        LayoutObservation observation = await LayoutChecks.Inspect(shot, regions, group, returnOnly, environment, new WindowsQuizOcr(), t).ConfigureAwait(false);
+                        if (layout.Custom[observation.Group] && (calibration.Environment == null || !calibration.Environment.Matches(environment)))
+                        { observation.Ready = false; observation.Passed = false; observation.Reason = "当前环境与保存自定义区域时不同，请恢复默认并预检，或重新框选本页。"; }
+                        if (observation.Report != null && !observation.Passed)
+                            Log("区域复查诊断：" + CalibrationProbe.Export(dataDirectory, shot, regions, observation.Group, environment, observation.Report));
+                        return observation;
+                    }
+                }
+                catch (QuizPauseException e) { return new LayoutObservation { Group = Math.Max(0, group), Reason = e.Message }; }
+            }, g => layout.Custom[g], Log, token);
         }
     }
 }

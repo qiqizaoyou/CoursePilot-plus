@@ -25,6 +25,19 @@ namespace CoursePilot
         [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint process);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder value, int length);
+        [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+        [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+        internal void CheckVisible()
+        {
+            Guard();
+            if (Native.GetForegroundWindow() != Handle) throw new QuizPauseException("课程窗口未在前台，请手动切换到课程窗口；随课保持原窗口状态。");
+            Rectangle area = LayoutChecks.ContentBounds(new Size(Width, Height), this);
+            foreach (double x in new[] { .05, .5, .95 }) foreach (double y in new[] { .05, .5, .95 })
+            {
+                Point point = new Point(X + area.Left + (int)(area.Width * x), Y + area.Top + (int)(area.Height * y));
+                if (GetAncestor(WindowFromPoint(point), 2) != Handle) throw new QuizPauseException("课程内容被其他窗口遮挡，请露出课程后重试；未判定区域配置不适用。");
+            }
+        }
         internal static CalibrationEnvironment CaptureForeground(Forms.Screen screen)
         {
             IntPtr handle = Native.GetForegroundWindow();
@@ -64,7 +77,7 @@ namespace CoursePilot
         {
             Forms.Screen screen = Forms.Screen.AllScreens.FirstOrDefault(s => s.DeviceName == Device);
             if (screen == null || !Matches(Capture(screen, Handle)))
-                throw new QuizPauseException("屏幕、缩放或课程窗口位置/尺寸发生变化，已暂停；请重新执行手动校准和预检。");
+                throw new QuizPauseException("屏幕、缩放或课程窗口位置/尺寸发生变化，已暂停；请重新预检当前布局。");
         }
     }
 
@@ -129,6 +142,7 @@ namespace CoursePilot
     internal sealed class CalibrationReport
     {
         public bool Passed;
+        public string Error;
         public string Page;
         public List<string> Checks = new List<string>();
         public List<string> Points = new List<string>();
@@ -185,7 +199,7 @@ namespace CoursePilot
                 }
             }
             catch (OperationCanceledException) { throw; }
-            catch (Exception e) { report.Check(false, "本地识别未完成：" + e.Message); }
+            catch (Exception e) { report.Error = "本地识别未完成：" + e.Message; report.Check(false, report.Error); }
             return report;
         }
         internal static string Export(string root, Bitmap screen, Regions regions, int group, CalibrationEnvironment environment, CalibrationReport report)
@@ -196,7 +210,7 @@ namespace CoursePilot
             for (int i = 0; i < areas.Length; i++) using (Bitmap crop = Recognition.Crop(screen, areas[i])) crop.Save(Path.Combine(directory, "region-" + (i + 1) + ".png"), ImageFormat.Png);
             if (group == 1) using (Bitmap crop = Recognition.Crop(screen, areas[0]))
             { Recognition.MarkTaskCandidates(crop); crop.Save(Path.Combine(directory, "task-candidates.png"), ImageFormat.Png); }
-            File.WriteAllText(Path.Combine(directory, "report.json"), new JavaScriptSerializer().Serialize(new { version = "0.6.17", environment, report,
+            File.WriteAllText(Path.Combine(directory, "report.json"), new JavaScriptSerializer().Serialize(new { version = "0.6.18", environment, report,
                 regions = areas, names = CalibrationAreas.Names(group) }), Encoding.UTF8);
             File.WriteAllText(Path.Combine(directory, "说明.txt"), "此包由只识别模式生成，未点击课程、滚动或调用模型。仅包含本次选定区域截图及识别诊断，不包含 API Key。\n" + report.Summary(), Encoding.UTF8);
             return directory;

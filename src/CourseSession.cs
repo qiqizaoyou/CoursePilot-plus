@@ -42,17 +42,19 @@ namespace CoursePilot
         private readonly SessionTiming timing;
         private readonly IQuizHandler quiz;
         private readonly IDirectoryTaskReader taskReader;
+        private readonly Func<int?, CancellationToken, Task> validateLayout;
         private enum LessonResult { Complete, PlaybackFailed, Skipped }
 
         public CourseSession(IDesktop desktop, Regions regions, Action<string> log,
             Action<Bitmap, Bitmap, int, int> directoryPreview, Action<Bitmap, Bitmap, int, string> coursePreview,
-            ISessionClock clock, SessionTiming timing, IQuizHandler quiz = null, IDirectoryTaskReader taskReader = null)
+            ISessionClock clock, SessionTiming timing, IQuizHandler quiz = null, IDirectoryTaskReader taskReader = null, Func<int?, CancellationToken, Task> validateLayout = null)
         {
             this.desktop = desktop; this.regions = regions.Clone(); this.log = log;
             this.directoryPreview = directoryPreview; this.coursePreview = coursePreview;
             this.clock = clock; this.timing = timing;
             this.quiz = quiz;
             this.taskReader = taskReader;
+            this.validateLayout = validateLayout;
         }
 
         public async Task<Outcome> Run(CancellationToken cancellation)
@@ -73,6 +75,7 @@ namespace CoursePilot
                     log("目录黄点数字 0：进入后停留 5 秒，然后返回目录。");
                     await clock.Delay(5000, cancellation).ConfigureAwait(false);
                     cancellation.ThrowIfCancellationRequested();
+                    if (validateLayout != null) await validateLayout(0, cancellation).ConfigureAwait(false);
                     skipped.Add(finder.EnteredLessonKey);
                     desktop.Click(Center(regions.Back));
                     log("数字 0 课程已停留 5 秒，本轮已处理；返回目录继续下一节。");
@@ -81,6 +84,7 @@ namespace CoursePilot
 
                 log("已进入课程，等待 5 秒让页面充分加载。");
                 await clock.Delay(timing.Load, cancellation).ConfigureAwait(false);
+                if (validateLayout != null) await validateLayout(finder.EnteredTaskCount, cancellation).ConfigureAwait(false);
                 bool quizComplete = false;
                 Point quizReturn = Point.Empty;
                 if (quiz != null)

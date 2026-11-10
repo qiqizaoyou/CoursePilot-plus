@@ -139,7 +139,7 @@ namespace CoursePilot
             string controls = String.Join(" ", text.Lines.Where(l => l.Bounds.Top >= height * .70).Select(l => QuizVision.Normalize(l.Text)));
             return Regex.Matches(controls, @"\d{1,2}:\d{2}").Count >= 2 && Regex.IsMatch(controls, "播放|暂停|倍速|音量|全屏");
         }
-        private static bool KnownEmpty(QuizTextPage text)
+        internal static bool KnownEmpty(QuizTextPage text)
         { return text.Lines.Any(l => Regex.IsMatch(QuizVision.Normalize(l.Text), "^(暂无内容|暂无学习内容|本节暂无内容)$")); }
     }
 
